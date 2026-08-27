@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: use-web-backend
+
+logging:
+  level:
+    de.useweb.backend: DEBUG

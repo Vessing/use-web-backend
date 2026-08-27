@@ -1,0 +1,9 @@
+id	inventoryId	matrixId	pipeline	expression	expectedSuccess	expectedType	expectedValue	expectedDiagnosticCode
+OCL24-CASE-SYN-001	OCL24-SYN-014	CM-OCL-005	SYNTAX	if true then 1 else 2 endif	true	-	-	-
+OCL24-CASE-SYN-002	OCL24-SYN-017	CM-OCL-018	SYNTAX	Set{1, 2, 3}	true	-	-	-
+OCL24-CASE-WFR-001	OCL24-WFR-006	CM-OCL-006	TYPECHECK	true implies false	true	Boolean	-	-
+OCL24-CASE-WFR-002	OCL24-WFR-009	CM-OCL-019	TYPECHECK	Set{1}->forAll(i | i > 0)	true	Boolean	-	-
+OCL24-CASE-SEM-001	OCL24-SEM-004	CM-OCL-006	EVALUATION	false implies invalid	true	Boolean	true	-
+OCL24-CASE-SEM-002	OCL24-SEM-011	CM-OCL-020	EVALUATION	Set{}->forAll(i | false)	true	Boolean	true	-
+OCL24-CASE-DIA-001	OCL24-WFR-009	CM-OCL-019	DIAGNOSTIC	Set{1}->forAll(i | i)	false	-	-	INVALID_ITERATOR_BODY_TYPE
+OCL24-CASE-DIA-002	OCL24-SYN-014	CM-OCL-002	DIAGNOSTIC	if true then 1 else 2	false	-	-	MISSING_TOKEN

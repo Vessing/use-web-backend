@@ -1,0 +1,155 @@
+id,kind,group,name,signature,specReference,parentMatrixId,requirement,status
+OCL24-SYN-001,SYNTAX,Lexical,identifier,-,OCL 2.4 Clauses 8-9,CM-OCL-001,Identifiers and qualified names follow the OCL lexical grammar,INVENTORIED
+OCL24-SYN-002,SYNTAX,Lexical,keywords,-,OCL 2.4 Clauses 8-9,CM-OCL-001,Reserved words are distinguished from identifiers,INVENTORIED
+OCL24-SYN-003,SYNTAX,Lexical,comments-whitespace,-,OCL 2.4 Clauses 8-9,CM-OCL-001,Comments and whitespace do not change expression meaning,INVENTORIED
+OCL24-SYN-004,SYNTAX,Literals,boolean-literal,-,OCL 2.4 Clauses 8-9,CM-OCL-006,Boolean literals are accepted,INVENTORIED
+OCL24-SYN-005,SYNTAX,Literals,numeric-literal,-,OCL 2.4 Clauses 8-9,CM-OCL-008,Integer Real and UnlimitedNatural literals are distinguished,INVENTORIED
+OCL24-SYN-006,SYNTAX,Literals,string-literal,-,OCL 2.4 Clauses 8-9,CM-OCL-009,String literals and escapes follow OCL syntax,INVENTORIED
+OCL24-SYN-007,SYNTAX,Literals,null-invalid-literal,-,OCL 2.4 Clauses 8-9,CM-OCL-010,Null and invalid literal forms are represented explicitly,INVENTORIED
+OCL24-SYN-008,SYNTAX,Calls,property-call,-,OCL 2.4 Clauses 8-9,CM-OCL-011,Dot property and operation calls are parsed,INVENTORIED
+OCL24-SYN-009,SYNTAX,Calls,collection-call,-,OCL 2.4 Clauses 8-9,CM-OCL-011,Arrow collection calls are parsed,INVENTORIED
+OCL24-SYN-010,SYNTAX,Control,let-expression,-,OCL 2.4 Clauses 8-9,CM-OCL-004,Let declaration and in body are parsed,INVENTORIED
+OCL24-SYN-011,SYNTAX,Control,if-expression,-,OCL 2.4 Clauses 8-9,CM-OCL-005,If then else endif is parsed,INVENTORIED
+OCL24-SYN-012,SYNTAX,Collections,collection-literal,-,OCL 2.4 Clauses 8-9,CM-OCL-018,Set Bag Sequence OrderedSet and Collection literals are parsed,INVENTORIED
+OCL24-SYN-013,SYNTAX,Collections,collection-range,-,OCL 2.4 Clauses 8-9,CM-OCL-018,Collection ranges are parsed,INVENTORIED
+OCL24-SYN-014,SYNTAX,Collections,iterator-expression,-,OCL 2.4 Clauses 8-9,CM-OCL-019,Iterator declarations separator and body are parsed,INVENTORIED
+OCL24-SYN-015,SYNTAX,Collections,iterate-expression,-,OCL 2.4 Clauses 8-9,CM-OCL-023,Iterator accumulator declaration and body are parsed,INVENTORIED
+OCL24-SYN-016,SYNTAX,Types,tuple-literal,-,OCL 2.4 Clauses 8-9,CM-OCL-016,Tuple literal parts and optional types are parsed,INVENTORIED
+OCL24-SYN-017,SYNTAX,Types,enum-literal,-,OCL 2.4 Clauses 8-9,CM-OCL-017,Qualified enumeration literals are parsed,INVENTORIED
+OCL24-SYN-018,SYNTAX,Operators,operator-precedence,-,OCL 2.4 Clauses 8-9,CM-OCL-006,Unary multiplicative additive relational equality and Boolean precedence is preserved,INVENTORIED
+OCL24-SYN-019,SYNTAX,State,pre-state,-,OCL 2.4 Clauses 8-9 and 12,CM-OCL-025,At-pre syntax is parsed only in applicable contexts,INVENTORIED
+OCL24-SYN-020,SYNTAX,Messages,message-expression,-,OCL 2.4 optional evaluation point,CM-OCL-026,Message expression syntax is inventoried,REVIEW_REQUIRED
+OCL24-SYN-021,SYNTAX,Diagnostics,source-range,-,OCL 2.4 Clauses 8-9,CM-OCL-002,Every token and parsed expression can be associated with a source range,INVENTORIED
+OCL24-SYN-022,SYNTAX,State,ocl-in-state,-,OCL 2.4 optional evaluation point,CM-OCL-027,State-related expression syntax is inventoried,REVIEW_REQUIRED
+OCL24-WFR-001,WELL_FORMEDNESS,Scope,self-binding,-,OCL 2.4 Clauses 8-10,CM-OCL-003,Self has the context classifier type,INVENTORIED
+OCL24-WFR-002,WELL_FORMEDNESS,Scope,variable-binding,-,OCL 2.4 Clauses 8-10,CM-OCL-003,Variable references resolve in lexical scope,INVENTORIED
+OCL24-WFR-003,WELL_FORMEDNESS,Scope,shadowing,-,OCL 2.4 Clauses 8-10,CM-OCL-003,Nested bindings follow lexical shadowing rules,INVENTORIED
+OCL24-WFR-004,WELL_FORMEDNESS,Control,let-type,-,OCL 2.4 Clauses 8-10,CM-OCL-004,Let initializer conforms to an explicit or inferred variable type,INVENTORIED
+OCL24-WFR-005,WELL_FORMEDNESS,Control,if-condition,-,OCL 2.4 Clauses 8-10,CM-OCL-005,If condition conforms to Boolean,INVENTORIED
+OCL24-WFR-006,WELL_FORMEDNESS,Control,if-result-type,-,OCL 2.4 Clauses 8-10,CM-OCL-005,If branches have a common conforming result type,INVENTORIED
+OCL24-WFR-007,WELL_FORMEDNESS,Calls,property-resolution,-,OCL 2.4 Clauses 8-10,CM-OCL-011,Property calls resolve against the source type and visibility context,INVENTORIED
+OCL24-WFR-008,WELL_FORMEDNESS,Calls,operation-resolution,-,OCL 2.4 Clauses 8-10,CM-OCL-011,Operation overloads resolve by argument types and conformance,INVENTORIED
+OCL24-WFR-009,WELL_FORMEDNESS,Navigation,attribute-chain,-,OCL 2.4 Clauses 8-10,CM-OCL-012,Each navigation segment is valid for the preceding static type,INVENTORIED
+OCL24-WFR-010,WELL_FORMEDNESS,Navigation,association-end,-,OCL 2.4 Clauses 8-10,CM-OCL-013,Association-end navigation resolves an unambiguous role and result type,INVENTORIED
+OCL24-WFR-011,WELL_FORMEDNESS,Types,type-operation,-,OCL 2.4 Clauses 8-11,CM-OCL-014,Type operation classifier arguments are valid classifier values,INVENTORIED
+OCL24-WFR-012,WELL_FORMEDNESS,Types,all-instances,-,OCL 2.4 optional evaluation point,CM-OCL-015,AllInstances is invoked on a classifier value,INVENTORIED
+OCL24-WFR-013,WELL_FORMEDNESS,Types,tuple-parts,-,OCL 2.4 Clauses 8-11,CM-OCL-016,Tuple part names are unique and values conform to declared part types,INVENTORIED
+OCL24-WFR-014,WELL_FORMEDNESS,Types,enum-resolution,-,OCL 2.4 Clauses 8-11,CM-OCL-017,Enumeration literal belongs to the resolved enumeration,INVENTORIED
+OCL24-WFR-015,WELL_FORMEDNESS,Collections,collection-common-type,-,OCL 2.4 Clauses 8-11,CM-OCL-018,Collection literal elements have a common conforming element type,INVENTORIED
+OCL24-WFR-016,WELL_FORMEDNESS,Collections,iterator-source,-,OCL 2.4 Clauses 8-11,CM-OCL-019,Iterator source conforms to a collection type,INVENTORIED
+OCL24-WFR-017,WELL_FORMEDNESS,Collections,iterator-body,-,OCL 2.4 Clauses 8-11,CM-OCL-020,Predicate iterator bodies conform to Boolean where required,INVENTORIED
+OCL24-WFR-018,WELL_FORMEDNESS,Collections,iterate-accumulator,-,OCL 2.4 Clauses 8-11,CM-OCL-023,Iterate body conforms to the accumulator type,INVENTORIED
+OCL24-WFR-019,WELL_FORMEDNESS,Contracts,pre-result-scope,-,OCL 2.4 Clause 12,CM-OCL-025,Result and at-pre are available only in applicable operation contexts,INVENTORIED
+OCL24-WFR-020,WELL_FORMEDNESS,Contexts,constraint-context,-,OCL 2.4 Clause 12,CM-CTX-001,Constraint expressions conform to the required context result type,INVENTORIED
+OCL24-WFR-021,WELL_FORMEDNESS,Types,tuple-structural-type,-,OCL 2.4 Clauses 8-11,CM-LIB-007,Tuple types are determined structurally by their named part types,INVENTORIED
+OCL24-WFR-022,WELL_FORMEDNESS,Collections,ordered-iterator-body,-,OCL 2.4 Clause 11,CM-OCL-022,SortedBy keys are comparable and closure bodies return compatible navigation values,INVENTORIED
+OCL24-WFR-023,WELL_FORMEDNESS,Collections,implicit-collect,-,OCL 2.4 Clauses 8-11,CM-OCL-024,Collection call shorthand is distinguished from explicit iterator syntax and optional USE compatibility,REVIEW_REQUIRED
+OCL24-SEM-001,SEMANTICS,Values,value-equality,-,OCL 2.4 Clauses 10-11,CM-OCL-007,Equality follows OCL value and object identity semantics,INVENTORIED
+OCL24-SEM-002,SEMANTICS,Values,null-semantics,-,OCL 2.4 Clauses 10-11,CM-OCL-010,Null is represented as OclVoid and not Java null,INVENTORIED
+OCL24-SEM-003,SEMANTICS,Values,invalid-propagation,-,OCL 2.4 Clauses 10-11,CM-OCL-010,Invalid propagates according to the invoked operation semantics,INVENTORIED
+OCL24-SEM-004,SEMANTICS,Boolean,four-valued-logic,-,OCL 2.4 Clauses 10-11,CM-OCL-006,Boolean operations follow OCL truth tables including null and invalid,INVENTORIED
+OCL24-SEM-005,SEMANTICS,Control,lazy-if,-,OCL 2.4 Clauses 10-11,CM-OCL-005,Only the selected if branch is evaluated,INVENTORIED
+OCL24-SEM-006,SEMANTICS,Navigation,property-evaluation,-,OCL 2.4 Clauses 10-11,CM-OCL-012,Property navigation reads the current evaluation environment and snapshot,INVENTORIED
+OCL24-SEM-007,SEMANTICS,Navigation,association-evaluation,-,OCL 2.4 Clauses 10-11,CM-OCL-013,Association navigation preserves multiplicity ordering and uniqueness semantics,INVENTORIED
+OCL24-SEM-008,SEMANTICS,Types,dynamic-type,-,OCL 2.4 Clauses 10-11,CM-OCL-014,Runtime type operations use classifier conformance,INVENTORIED
+OCL24-SEM-009,SEMANTICS,Types,all-instances-snapshot,-,OCL 2.4 optional evaluation point,CM-OCL-015,AllInstances is evaluated against a defined model and snapshot boundary,INVENTORIED
+OCL24-SEM-010,SEMANTICS,Collections,collection-kind,-,OCL 2.4 Clause 11,CM-OCL-018,Collection evaluation preserves Set Bag Sequence and OrderedSet characteristics,INVENTORIED
+OCL24-SEM-011,SEMANTICS,Collections,quantifier-empty,-,OCL 2.4 Clause 11,CM-OCL-020,Quantifiers have defined results for empty collections,INVENTORIED
+OCL24-SEM-012,SEMANTICS,Collections,collect-flattening,-,OCL 2.4 Clause 11,CM-OCL-021,Collect and collectNested apply their distinct flattening semantics,INVENTORIED
+OCL24-SEM-013,SEMANTICS,Collections,iterator-bindings,-,OCL 2.4 Clause 11,CM-OCL-019,Multiple iterator variables range over the defined binding product,INVENTORIED
+OCL24-SEM-014,SEMANTICS,Contracts,pre-state-evaluation,-,OCL 2.4 Clause 12 and optional point,CM-OCL-025,At-pre reads the pre-state and oclIsNew compares object lifecycles,INVENTORIED
+OCL24-SEM-015,SEMANTICS,Messages,message-trace,-,OCL 2.4 optional evaluation point,CM-OCL-026,Message expressions require an explicitly defined operation trace,REVIEW_REQUIRED
+OCL24-CTX-001,CONTEXT,Constraints,invariant,-,OCL 2.4 Clause 12,CM-CTX-001,Classifier invariant has self and Boolean result,INVENTORIED
+OCL24-CTX-002,CONTEXT,Contracts,precondition,-,OCL 2.4 Clause 12,CM-CTX-002,Precondition is checked in the operation pre-state,INVENTORIED
+OCL24-CTX-003,CONTEXT,Contracts,postcondition,-,OCL 2.4 Clause 12,CM-CTX-003,Postcondition may access result and the operation pre-state,INVENTORIED
+OCL24-CTX-004,CONTEXT,Definitions,operation-body,-,OCL 2.4 Clause 12,CM-CTX-004,Operation body result conforms to the operation return type,INVENTORIED
+OCL24-CTX-005,CONTEXT,Definitions,derived-property,-,OCL 2.4 Clause 12,CM-CTX-005,Derived property expression conforms to the property type,INVENTORIED
+OCL24-CTX-006,CONTEXT,Definitions,initial-value,-,OCL 2.4 Clause 12,CM-CTX-006,Initial expression conforms to the initialized property type,INVENTORIED
+OCL24-CTX-007,CONTEXT,Definitions,def,-,OCL 2.4 Clause 12,CM-CTX-007,Additional property or operation definitions have a typed lexical context,INVENTORIED
+OCL24-CTX-008,CONTEXT,Namespaces,package-context,-,OCL 2.4 Clause 12,CM-CTX-008,Package context resolves qualified model names,INVENTORIED
+OCL24-CP-001,COMPLIANCE_POINT,Compliance,syntax-compliance,-,OCL 2.4 Compliance,CM-OCL-001,Syntax compliance is claimed only for inventoried and verified grammar and well-formedness rules,INVENTORIED
+OCL24-CP-002,COMPLIANCE_POINT,Compliance,evaluation-compliance,-,OCL 2.4 Compliance,CM-OCL-010,Evaluation compliance is claimed only for inventoried and verified semantics and library signatures,INVENTORIED
+OCL24-CP-003,COMPLIANCE_POINT,Compliance,xmi-compliance,-,OCL 2.4 Compliance,CM-OCL-002,XMI interchange is a separate compliance undertaking,OUT_OF_SCOPE
+OCL24-CP-004,COMPLIANCE_POINT,Optional,all-instances,-,OCL 2.4 optional evaluation point,CM-OCL-015,Support for allInstances is stated explicitly,INVENTORIED
+OCL24-CP-005,COMPLIANCE_POINT,Optional,pre-values-ocl-is-new,-,OCL 2.4 optional evaluation point,CM-OCL-025,Support for pre-values and oclIsNew is stated explicitly,INVENTORIED
+OCL24-CP-006,COMPLIANCE_POINT,Optional,ocl-message,-,OCL 2.4 optional evaluation point,CM-OCL-026,Support for OclMessage is stated explicitly,REVIEW_REQUIRED
+OCL24-CP-007,COMPLIANCE_POINT,Optional,non-navigable-association,-,OCL 2.4 optional evaluation point,CM-OCL-013,Navigation over non-navigable association ends is stated explicitly,REVIEW_REQUIRED
+OCL24-CP-008,COMPLIANCE_POINT,Optional,private-protected-access,-,OCL 2.4 optional evaluation point,CM-OCL-011,Access to private and protected model features is stated explicitly,REVIEW_REQUIRED
+OCL24-LIB-OA-001,LIBRARY_SIGNATURE,OclAny,equality,OclAny::=(other:OclAny):Boolean,OCL 2.4 Clause 11,CM-LIB-001,Value equality operation,INVENTORIED
+OCL24-LIB-OA-002,LIBRARY_SIGNATURE,OclAny,inequality,OclAny::<>(other:OclAny):Boolean,OCL 2.4 Clause 11,CM-LIB-001,Value inequality operation,INVENTORIED
+OCL24-LIB-OA-003,LIBRARY_SIGNATURE,OclAny,ocl-is-undefined,OclAny::oclIsUndefined():Boolean,OCL 2.4 Clause 11,CM-LIB-001,Undefined query,INVENTORIED
+OCL24-LIB-OA-004,LIBRARY_SIGNATURE,OclAny,ocl-is-invalid,OclAny::oclIsInvalid():Boolean,OCL 2.4 Clause 11,CM-LIB-002,Invalid query,INVENTORIED
+OCL24-LIB-OA-005,LIBRARY_SIGNATURE,OclAny,ocl-is-new,OclAny::oclIsNew():Boolean,OCL 2.4 optional evaluation point,CM-LIB-001,New-object query in postconditions,INVENTORIED
+OCL24-LIB-OA-006,LIBRARY_SIGNATURE,OclAny,ocl-is-type-of,OclAny::oclIsTypeOf(type:Classifier):Boolean,OCL 2.4 Clause 11,CM-LIB-001,Exact runtime type query,INVENTORIED
+OCL24-LIB-OA-007,LIBRARY_SIGNATURE,OclAny,ocl-is-kind-of,OclAny::oclIsKindOf(type:Classifier):Boolean,OCL 2.4 Clause 11,CM-LIB-001,Conforming runtime type query,INVENTORIED
+OCL24-LIB-OA-008,LIBRARY_SIGNATURE,OclAny,ocl-as-type,OclAny::oclAsType(type:Classifier):T,OCL 2.4 Clause 11,CM-LIB-001,Checked runtime cast,INVENTORIED
+OCL24-LIB-OV-001,LIBRARY_SIGNATURE,OclVoid,ocl-is-undefined,OclVoid::oclIsUndefined():Boolean,OCL 2.4 Clause 11,CM-LIB-003,Undefined query inherited for the null value,INVENTORIED
+OCL24-LIB-BO-001,LIBRARY_SIGNATURE,Boolean,or,Boolean::or(other:Boolean):Boolean,OCL 2.4 Clause 11,CM-LIB-004,Four-valued disjunction,INVENTORIED
+OCL24-LIB-BO-002,LIBRARY_SIGNATURE,Boolean,xor,Boolean::xor(other:Boolean):Boolean,OCL 2.4 Clause 11,CM-LIB-004,Four-valued exclusive disjunction,INVENTORIED
+OCL24-LIB-BO-003,LIBRARY_SIGNATURE,Boolean,and,Boolean::and(other:Boolean):Boolean,OCL 2.4 Clause 11,CM-LIB-004,Four-valued conjunction,INVENTORIED
+OCL24-LIB-BO-004,LIBRARY_SIGNATURE,Boolean,not,Boolean::not():Boolean,OCL 2.4 Clause 11,CM-LIB-004,Boolean negation,INVENTORIED
+OCL24-LIB-BO-005,LIBRARY_SIGNATURE,Boolean,implies,Boolean::implies(other:Boolean):Boolean,OCL 2.4 Clause 11,CM-LIB-004,Four-valued implication,INVENTORIED
+OCL24-LIB-NU-001,LIBRARY_SIGNATURE,Real,add,Real::+(other:Real):Real,OCL 2.4 Clause 11,CM-LIB-005,Real addition,INVENTORIED
+OCL24-LIB-NU-002,LIBRARY_SIGNATURE,Real,subtract,Real::-(other:Real):Real,OCL 2.4 Clause 11,CM-LIB-005,Real subtraction,INVENTORIED
+OCL24-LIB-NU-003,LIBRARY_SIGNATURE,Real,multiply,Real::*(other:Real):Real,OCL 2.4 Clause 11,CM-LIB-005,Real multiplication,INVENTORIED
+OCL24-LIB-NU-004,LIBRARY_SIGNATURE,Real,divide,Real::/(other:Real):Real,OCL 2.4 Clause 11,CM-LIB-005,Real division,INVENTORIED
+OCL24-LIB-NU-005,LIBRARY_SIGNATURE,Real,negate,Real::unary-():Real,OCL 2.4 Clause 11,CM-LIB-005,Real negation,INVENTORIED
+OCL24-LIB-NU-006,LIBRARY_SIGNATURE,Real,abs,Real::abs():Real,OCL 2.4 Clause 11,CM-LIB-005,Absolute value,INVENTORIED
+OCL24-LIB-NU-007,LIBRARY_SIGNATURE,Real,floor,Real::floor():Integer,OCL 2.4 Clause 11,CM-LIB-005,Floor conversion,INVENTORIED
+OCL24-LIB-NU-008,LIBRARY_SIGNATURE,Real,round,Real::round():Integer,OCL 2.4 Clause 11,CM-LIB-005,Round conversion,INVENTORIED
+OCL24-LIB-NU-009,LIBRARY_SIGNATURE,Integer,div,Integer::div(other:Integer):Integer,OCL 2.4 Clause 11,CM-LIB-005,Integer division,INVENTORIED
+OCL24-LIB-NU-010,LIBRARY_SIGNATURE,Integer,mod,Integer::mod(other:Integer):Integer,OCL 2.4 Clause 11,CM-LIB-005,Integer modulo,INVENTORIED
+OCL24-LIB-ST-001,LIBRARY_SIGNATURE,String,size,String::size():Integer,OCL 2.4 Clause 11,CM-LIB-006,String length,INVENTORIED
+OCL24-LIB-ST-002,LIBRARY_SIGNATURE,String,concat,String::concat(other:String):String,OCL 2.4 Clause 11,CM-LIB-006,String concatenation,INVENTORIED
+OCL24-LIB-ST-003,LIBRARY_SIGNATURE,String,substring,String::substring(lower:Integer;upper:Integer):String,OCL 2.4 Clause 11,CM-LIB-006,One-based inclusive substring,INVENTORIED
+OCL24-LIB-ST-004,LIBRARY_SIGNATURE,String,to-integer,String::toInteger():Integer,OCL 2.4 Clause 11,CM-LIB-006,String to Integer conversion,INVENTORIED
+OCL24-LIB-ST-005,LIBRARY_SIGNATURE,String,to-real,String::toReal():Real,OCL 2.4 Clause 11,CM-LIB-006,String to Real conversion,INVENTORIED
+OCL24-LIB-ST-006,LIBRARY_SIGNATURE,String,to-upper,String::toUpper():String,OCL 2.4 Clause 11,CM-LIB-006,Upper-case conversion,INVENTORIED
+OCL24-LIB-ST-007,LIBRARY_SIGNATURE,String,to-lower,String::toLower():String,OCL 2.4 Clause 11,CM-LIB-006,Lower-case conversion,INVENTORIED
+OCL24-LIB-CO-001,LIBRARY_SIGNATURE,Collection,size,Collection(T)::size():Integer,OCL 2.4 Clause 11,CM-LIB-008,Collection cardinality,INVENTORIED
+OCL24-LIB-CO-002,LIBRARY_SIGNATURE,Collection,includes,Collection(T)::includes(object:T):Boolean,OCL 2.4 Clause 11,CM-LIB-008,Element membership,INVENTORIED
+OCL24-LIB-CO-003,LIBRARY_SIGNATURE,Collection,excludes,Collection(T)::excludes(object:T):Boolean,OCL 2.4 Clause 11,CM-LIB-008,Element non-membership,INVENTORIED
+OCL24-LIB-CO-004,LIBRARY_SIGNATURE,Collection,count,Collection(T)::count(object:T):Integer,OCL 2.4 Clause 11,CM-LIB-008,Element occurrence count,INVENTORIED
+OCL24-LIB-CO-005,LIBRARY_SIGNATURE,Collection,includes-all,Collection(T)::includesAll(other:Collection(T)):Boolean,OCL 2.4 Clause 11,CM-LIB-008,Collection inclusion,INVENTORIED
+OCL24-LIB-CO-006,LIBRARY_SIGNATURE,Collection,excludes-all,Collection(T)::excludesAll(other:Collection(T)):Boolean,OCL 2.4 Clause 11,CM-LIB-008,Collection disjointness,INVENTORIED
+OCL24-LIB-CO-007,LIBRARY_SIGNATURE,Collection,is-empty,Collection(T)::isEmpty():Boolean,OCL 2.4 Clause 11,CM-LIB-008,Empty query,INVENTORIED
+OCL24-LIB-CO-008,LIBRARY_SIGNATURE,Collection,not-empty,Collection(T)::notEmpty():Boolean,OCL 2.4 Clause 11,CM-LIB-008,Non-empty query,INVENTORIED
+OCL24-LIB-CO-009,LIBRARY_SIGNATURE,Collection,sum,Collection(T)::sum():T,OCL 2.4 Clause 11,CM-LIB-008,Element addition fold,INVENTORIED
+OCL24-LIB-CO-010,LIBRARY_SIGNATURE,Collection,product,Collection(T)::product(other:Collection(T2)):Set(Tuple(first:T;second:T2)),OCL 2.4 Clause 11,CM-LIB-008,Cartesian product,INVENTORIED
+OCL24-LIB-CO-011,LIBRARY_SIGNATURE,Collection,as-set,Collection(T)::asSet():Set(T),OCL 2.4 Clause 11,CM-LIB-013,Set conversion,INVENTORIED
+OCL24-LIB-CO-012,LIBRARY_SIGNATURE,Collection,as-bag,Collection(T)::asBag():Bag(T),OCL 2.4 Clause 11,CM-LIB-013,Bag conversion,INVENTORIED
+OCL24-LIB-CO-013,LIBRARY_SIGNATURE,Collection,as-sequence,Collection(T)::asSequence():Sequence(T),OCL 2.4 Clause 11,CM-LIB-013,Sequence conversion,INVENTORIED
+OCL24-LIB-CO-014,LIBRARY_SIGNATURE,Collection,as-ordered-set,Collection(T)::asOrderedSet():OrderedSet(T),OCL 2.4 Clause 11,CM-LIB-013,OrderedSet conversion,INVENTORIED
+OCL24-LIB-SE-001,LIBRARY_SIGNATURE,Set,including,Set(T)::including(object:T2):Set(T),OCL 2.4 Clause 11,CM-LIB-009,Set insertion with common type,INVENTORIED
+OCL24-LIB-SE-002,LIBRARY_SIGNATURE,Set,excluding,Set(T)::excluding(object:OclAny):Set(T),OCL 2.4 Clause 11,CM-LIB-009,Set removal,INVENTORIED
+OCL24-LIB-SE-003,LIBRARY_SIGNATURE,Set,union-set,Set(T)::union(other:Set(T2)):Set(T),OCL 2.4 Clause 11,CM-LIB-009,Set union overload,INVENTORIED
+OCL24-LIB-SE-004,LIBRARY_SIGNATURE,Set,union-bag,Set(T)::union(other:Bag(T2)):Bag(T),OCL 2.4 Clause 11,CM-LIB-009,Set and Bag union overload,INVENTORIED
+OCL24-LIB-SE-005,LIBRARY_SIGNATURE,Set,intersection,Set(T)::intersection(other:Set(T)):Set(T),OCL 2.4 Clause 11,CM-LIB-014,Set intersection,INVENTORIED
+OCL24-LIB-SE-006,LIBRARY_SIGNATURE,Set,symmetric-difference,Set(T)::symmetricDifference(other:Set(T)):Set(T),OCL 2.4 Clause 11,CM-LIB-014,Set symmetric difference,INVENTORIED
+OCL24-LIB-BA-001,LIBRARY_SIGNATURE,Bag,including,Bag(T)::including(object:T2):Bag(T),OCL 2.4 Clause 11,CM-LIB-010,Bag insertion,INVENTORIED
+OCL24-LIB-BA-002,LIBRARY_SIGNATURE,Bag,excluding,Bag(T)::excluding(object:OclAny):Bag(T),OCL 2.4 Clause 11,CM-LIB-010,Bag removal,INVENTORIED
+OCL24-LIB-BA-003,LIBRARY_SIGNATURE,Bag,union-bag,Bag(T)::union(other:Bag(T2)):Bag(T),OCL 2.4 Clause 11,CM-LIB-010,Bag union overload,INVENTORIED
+OCL24-LIB-BA-004,LIBRARY_SIGNATURE,Bag,union-set,Bag(T)::union(other:Set(T2)):Bag(T),OCL 2.4 Clause 11,CM-LIB-010,Bag and Set union overload,INVENTORIED
+OCL24-LIB-BA-005,LIBRARY_SIGNATURE,Bag,intersection,Bag(T)::intersection(other:Bag(T)):Bag(T),OCL 2.4 Clause 11,CM-LIB-014,Bag intersection,INVENTORIED
+OCL24-LIB-SQ-001,LIBRARY_SIGNATURE,Sequence,append,Sequence(T)::append(object:T2):Sequence(T),OCL 2.4 Clause 11,CM-LIB-011,Append element,INVENTORIED
+OCL24-LIB-SQ-002,LIBRARY_SIGNATURE,Sequence,prepend,Sequence(T)::prepend(object:T2):Sequence(T),OCL 2.4 Clause 11,CM-LIB-011,Prepend element,INVENTORIED
+OCL24-LIB-SQ-003,LIBRARY_SIGNATURE,Sequence,insert-at,Sequence(T)::insertAt(index:Integer;object:T2):Sequence(T),OCL 2.4 Clause 11,CM-LIB-011,Insert at one-based index,INVENTORIED
+OCL24-LIB-SQ-004,LIBRARY_SIGNATURE,Sequence,sub-sequence,Sequence(T)::subSequence(lower:Integer;upper:Integer):Sequence(T),OCL 2.4 Clause 11,CM-LIB-011,Inclusive sequence slice,INVENTORIED
+OCL24-LIB-SQ-005,LIBRARY_SIGNATURE,Sequence,at,Sequence(T)::at(index:Integer):T,OCL 2.4 Clause 11,CM-LIB-011,Element at one-based index,INVENTORIED
+OCL24-LIB-SQ-006,LIBRARY_SIGNATURE,Sequence,index-of,Sequence(T)::indexOf(object:T):Integer,OCL 2.4 Clause 11,CM-LIB-011,First element index,INVENTORIED
+OCL24-LIB-SQ-007,LIBRARY_SIGNATURE,Sequence,first,Sequence(T)::first():T,OCL 2.4 Clause 11,CM-LIB-011,First element,INVENTORIED
+OCL24-LIB-SQ-008,LIBRARY_SIGNATURE,Sequence,last,Sequence(T)::last():T,OCL 2.4 Clause 11,CM-LIB-011,Last element,INVENTORIED
+OCL24-LIB-SQ-009,LIBRARY_SIGNATURE,Sequence,reverse,Sequence(T)::reverse():Sequence(T),OCL 2.4 Clause 11,CM-LIB-011,Reverse sequence,INVENTORIED
+OCL24-LIB-OS-001,LIBRARY_SIGNATURE,OrderedSet,append,OrderedSet(T)::append(object:T2):OrderedSet(T),OCL 2.4 Clause 11,CM-LIB-012,Append unique element,INVENTORIED
+OCL24-LIB-OS-002,LIBRARY_SIGNATURE,OrderedSet,prepend,OrderedSet(T)::prepend(object:T2):OrderedSet(T),OCL 2.4 Clause 11,CM-LIB-012,Prepend unique element,INVENTORIED
+OCL24-LIB-OS-003,LIBRARY_SIGNATURE,OrderedSet,insert-at,OrderedSet(T)::insertAt(index:Integer;object:T2):OrderedSet(T),OCL 2.4 Clause 11,CM-LIB-012,Insert unique element,INVENTORIED
+OCL24-LIB-OS-004,LIBRARY_SIGNATURE,OrderedSet,sub-ordered-set,OrderedSet(T)::subOrderedSet(lower:Integer;upper:Integer):OrderedSet(T),OCL 2.4 Clause 11,CM-LIB-012,Inclusive ordered set slice,INVENTORIED
+OCL24-LIB-OS-005,LIBRARY_SIGNATURE,OrderedSet,at,OrderedSet(T)::at(index:Integer):T,OCL 2.4 Clause 11,CM-LIB-012,Element at one-based index,INVENTORIED
+OCL24-LIB-OS-006,LIBRARY_SIGNATURE,OrderedSet,index-of,OrderedSet(T)::indexOf(object:T):Integer,OCL 2.4 Clause 11,CM-LIB-012,Element index,INVENTORIED
+OCL24-LIB-OS-007,LIBRARY_SIGNATURE,OrderedSet,first,OrderedSet(T)::first():T,OCL 2.4 Clause 11,CM-LIB-012,First element,INVENTORIED
+OCL24-LIB-OS-008,LIBRARY_SIGNATURE,OrderedSet,last,OrderedSet(T)::last():T,OCL 2.4 Clause 11,CM-LIB-012,Last element,INVENTORIED
+OCL24-LIB-OS-009,LIBRARY_SIGNATURE,OrderedSet,reverse,OrderedSet(T)::reverse():OrderedSet(T),OCL 2.4 Clause 11,CM-LIB-012,Reverse ordered set,INVENTORIED
+OCL24-LIB-TY-001,LIBRARY_SIGNATURE,Classifier,all-instances,Classifier::allInstances():Set(T),OCL 2.4 optional evaluation point,CM-LIB-015,Classifier instance query,INVENTORIED
+OCL24-LIB-MS-001,LIBRARY_SIGNATURE,OclMessage,has-returned,OclMessage::hasReturned():Boolean,OCL 2.4 optional evaluation point,CM-LIB-016,Message completion query,REVIEW_REQUIRED
+OCL24-LIB-MS-002,LIBRARY_SIGNATURE,OclMessage,result,OclMessage::result():OclAny,OCL 2.4 optional evaluation point,CM-LIB-016,Message result access,REVIEW_REQUIRED
+OCL24-LIB-STATE-001,LIBRARY_SIGNATURE,OclState,state-identity,OclState::=(other:OclState):Boolean,OCL 2.4 optional evaluation point,CM-LIB-017,State identity comparison,REVIEW_REQUIRED
