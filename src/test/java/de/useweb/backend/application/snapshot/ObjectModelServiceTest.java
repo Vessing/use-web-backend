@@ -15,11 +15,13 @@ import de.useweb.backend.api.dto.snapshot.ObjectLinkDto;
 import de.useweb.backend.api.dto.snapshot.ObjectLinkEndValueDto;
 import de.useweb.backend.api.dto.snapshot.SlotDto;
 import de.useweb.backend.api.dto.snapshot.SlotValueDto;
+import de.useweb.backend.api.dto.snapshot.QualifierValueDto;
 import de.useweb.backend.api.dto.uml.MultiplicityDto;
 import de.useweb.backend.api.dto.uml.UmlAssociationDto;
 import de.useweb.backend.api.dto.uml.UmlAssociationEndDto;
 import de.useweb.backend.api.dto.uml.UmlAttributeDto;
 import de.useweb.backend.api.dto.uml.UmlClassDto;
+import de.useweb.backend.api.dto.uml.UmlQualifierDefinitionDto;
 import de.useweb.backend.application.project.ProjectService;
 import de.useweb.backend.application.uml.UmlModelService;
 import de.useweb.backend.domain.project.Project;
@@ -160,6 +162,26 @@ class ObjectModelServiceTest {
     }
 
     @Test
+    void staticAttributesNeverCreateOrAcceptObjectSlots() {
+        Project project = projectService.createProject("Static values", "Classifier-scoped state");
+        UmlClassDto student = umlModelService.createClass(project.id(),
+                new UmlClassDto("class-student", "Student", List.of(), List.of()));
+        umlModelService.addAttribute(project.id(), new UmlClassId(student.id()),
+                new UmlAttributeDto("attr-number", "nextNumber", "Integer", false, null, null, "PUBLIC",
+                        List.of(), true, new SlotValueDto("Integer", 1043)));
+
+        ObjectInstanceDto created = objectModelService.createObject(project.id(),
+                new ObjectInstanceDto("student-1", "student1", student.id(), List.of()));
+
+        assertThat(created.slots()).isEmpty();
+        assertThatThrownBy(() -> objectModelService.setSlotValue(project.id(), new ObjectInstanceId(created.id()),
+                new SlotDto("slot-static", "attr-number", new SlotValueDto("Integer", 1044), false)))
+                .isInstanceOf(ObjectModelException.class)
+                .satisfies(exception -> assertThat(((ObjectModelException) exception).error().code())
+                        .isEqualTo("STATIC_FEATURE_HAS_NO_OBJECT_SLOT"));
+    }
+
+    @Test
     void failingInitDoesNotPersistTheDraftObject() {
         Project project = projectService.createProject("Definitions", "Atomic init failure");
         UmlClassDto item = umlModelService.createClass(project.id(),
@@ -237,12 +259,114 @@ class ObjectModelServiceTest {
                 .satisfies(error -> assertThat(((ObjectModelException) error).error().code())
                         .isEqualTo("COMPOSITE_OWNERSHIP_VIOLATION"));
 
-        objectModelService.deleteObject(projectId, new ObjectInstanceId(firstFolder.id()));
+        objectModelService.deleteObjectWithDependencies(projectId, new ObjectInstanceId(firstFolder.id()));
         Project saved = projectService.loadProject(projectId);
         assertThat(saved.objectModel().findObject(new ObjectInstanceId(firstFolder.id()))).isEmpty();
         assertThat(saved.objectModel().findObject(new ObjectInstanceId(fileObject.id()))).isEmpty();
         assertThat(saved.objectModel().findObject(new ObjectInstanceId(secondFolder.id()))).isPresent();
         assertThat(saved.objectModel().links()).isEmpty();
+    }
+
+    @Test
+    void updatesQualifiedNaryLinkAndPreservesOrderedUniqueEndMetadata() {
+        Project project = projectService.createProject("Nary", "B42 update");
+        ProjectId projectId = project.id();
+        UmlClassDto student = umlModelService.createClass(projectId,
+                new UmlClassDto("student", "Student", List.of(), List.of()));
+        UmlClassDto course = umlModelService.createClass(projectId,
+                new UmlClassDto("course", "Course", List.of(), List.of()));
+        UmlClassDto term = umlModelService.createClass(projectId,
+                new UmlClassDto("term", "Term", List.of(), List.of()));
+        umlModelService.createAssociation(projectId, new UmlAssociationDto("attendance", "Attendance", List.of(
+                new UmlAssociationEndDto("student-end", student.id(), "student", new MultiplicityDto(0, null, true, "*"),
+                        true, false, true, false, false, List.of(), List.of(), "SET", List.of(), "NONE"),
+                new UmlAssociationEndDto("course-end", course.id(), "courses", new MultiplicityDto(0, null, true, "*"),
+                        true, true, true, false, false, List.of(), List.of(), "ORDERED_SET",
+                        List.of(new UmlQualifierDefinitionDto("year", "year", "Integer", 0)), "NONE"),
+                new UmlAssociationEndDto("term-end", term.id(), "term", new MultiplicityDto(0, 1, false, "0..1"),
+                        true, false, true, false, false, List.of(), List.of(), null, List.of(), "NONE"))));
+        ObjectInstanceDto ada = objectModelService.createObject(projectId,
+                new ObjectInstanceDto("ada", "ada", student.id(), List.of()));
+        ObjectInstanceDto uml = objectModelService.createObject(projectId,
+                new ObjectInstanceDto("uml", "uml", course.id(), List.of()));
+        ObjectInstanceDto winter = objectModelService.createObject(projectId,
+                new ObjectInstanceDto("winter", "winter", term.id(), List.of()));
+        ObjectInstanceDto summer = objectModelService.createObject(projectId,
+                new ObjectInstanceDto("summer", "summer", term.id(), List.of()));
+        ObjectLinkDto created = objectModelService.createObjectLink(projectId,
+                new ObjectLinkDto("attendance-1", "attendance", List.of(
+                        new ObjectLinkEndValueDto("student-end", ada.id()),
+                        new ObjectLinkEndValueDto("course-end", uml.id(),
+                                List.of(new QualifierValueDto("year", new SlotValueDto("Integer", 2026)))),
+                        new ObjectLinkEndValueDto("term-end", winter.id()))));
+
+        ObjectLinkDto updated = objectModelService.updateObjectLink(projectId,
+                new de.useweb.backend.domain.snapshot.ObjectLinkId(created.id()),
+                new ObjectLinkDto("client-id-is-ignored", "attendance", List.of(
+                        new ObjectLinkEndValueDto("student-end", ada.id()),
+                        new ObjectLinkEndValueDto("course-end", uml.id(),
+                                List.of(new QualifierValueDto("year", new SlotValueDto("Integer", 2027)))),
+                        new ObjectLinkEndValueDto("term-end", summer.id()))));
+
+        assertThat(updated.id()).isEqualTo("attendance-1");
+        assertThat(updated.endValues().get(1).qualifierValues().getFirst().value().value()).isEqualTo(2027);
+        assertThat(updated.endValues().get(2).objectId()).isEqualTo("summer");
+        var storedEnd = projectService.loadProject(projectId).umlModel().findAssociation(
+                new de.useweb.backend.domain.uml.UmlAssociationId("attendance")).orElseThrow().ends().get(1);
+        assertThat(storedEnd.ordered()).isTrue();
+        assertThat(storedEnd.unique()).isTrue();
+    }
+
+    @Test
+    void directLegacyObjectDeleteCannotBypassObjectLinkDependencies() {
+        LibraryModel library = createLibraryModel();
+        ObjectInstanceDto alice = objectModelService.createObject(library.projectId(),
+                new ObjectInstanceDto("alice", "alice", "class-user", List.of()));
+        ObjectInstanceDto book = objectModelService.createObject(library.projectId(),
+                new ObjectInstanceDto("book", "book", "class-book", List.of()));
+        objectModelService.createObjectLink(library.projectId(), new ObjectLinkDto("borrows", "assoc-borrows", List.of(
+                new ObjectLinkEndValueDto("end-borrows-user", alice.id()),
+                new ObjectLinkEndValueDto("end-borrows-book", book.id()))));
+
+        assertThatThrownBy(() -> objectModelService.deleteObject(library.projectId(), new ObjectInstanceId(alice.id())))
+                .isInstanceOf(ObjectModelException.class)
+                .satisfies(error -> assertThat(((ObjectModelException) error).error().code()).isEqualTo("DELETE_BLOCKED"));
+        Project unchanged = projectService.loadProject(library.projectId());
+        assertThat(unchanged.objectModel().objects()).hasSize(2);
+        assertThat(unchanged.objectModel().links()).hasSize(1);
+    }
+
+    @Test
+    void rejectsUpperMultiplicityOverflowBeforePersistingLinkMutation() {
+        Project project = projectService.createProject("Upper bound", "B42 multiplicity");
+        ProjectId projectId = project.id();
+        UmlClassDto owner = umlModelService.createClass(projectId,
+                new UmlClassDto("owner", "Owner", List.of(), List.of()));
+        UmlClassDto item = umlModelService.createClass(projectId,
+                new UmlClassDto("item", "Item", List.of(), List.of()));
+        umlModelService.createAssociation(projectId, new UmlAssociationDto("owns", "Owns", List.of(
+                new UmlAssociationEndDto("owner-end", owner.id(), "owner", new MultiplicityDto(0, null, true, "*"),
+                        true, false, false, false, false, List.of(), List.of(), "BAG", List.of(), "NONE"),
+                new UmlAssociationEndDto("item-end", item.id(), "item", new MultiplicityDto(0, 1, false, "0..1"),
+                        true, false, false, false, false, List.of(), List.of(), "BAG", List.of(), "NONE"))));
+        ObjectInstanceDto ownerObject = objectModelService.createObject(projectId,
+                new ObjectInstanceDto("owner-1", "owner1", owner.id(), List.of()));
+        ObjectInstanceDto first = objectModelService.createObject(projectId,
+                new ObjectInstanceDto("item-1", "item1", item.id(), List.of()));
+        ObjectInstanceDto second = objectModelService.createObject(projectId,
+                new ObjectInstanceDto("item-2", "item2", item.id(), List.of()));
+        objectModelService.createObjectLink(projectId, new ObjectLinkDto("owns-1", "owns", List.of(
+                new ObjectLinkEndValueDto("owner-end", ownerObject.id()),
+                new ObjectLinkEndValueDto("item-end", first.id()))));
+
+        assertThatThrownBy(() -> objectModelService.createObjectLink(projectId,
+                new ObjectLinkDto("owns-2", "owns", List.of(
+                        new ObjectLinkEndValueDto("owner-end", ownerObject.id()),
+                        new ObjectLinkEndValueDto("item-end", second.id())))))
+                .isInstanceOf(ObjectModelException.class)
+                .satisfies(error -> assertThat(((ObjectModelException) error).error().code())
+                        .isEqualTo("MULTIPLICITY_VIOLATION"));
+        assertThat(projectService.loadProject(projectId).objectModel().links()).hasSize(1);
     }
 
     private UmlAssociationEndDto end(String id, String classId, String role, String aggregationKind) {

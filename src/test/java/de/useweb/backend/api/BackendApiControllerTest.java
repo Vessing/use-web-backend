@@ -262,6 +262,26 @@ class BackendApiControllerTest {
                 .andExpect(jsonPath("$.details.projectId", equalTo("project-does-not-exist")));
     }
 
+    @Test
+    void exposesTheAdditiveSemanticReadModel() throws Exception {
+        mockMvc.perform(get("/api/v1/projects/project-university-system/read-model"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projectId", equalTo("project-university-system")))
+                .andExpect(jsonPath("$.modelId", equalTo("uml-university-system")))
+                .andExpect(jsonPath("$.snapshotId", equalTo("snapshot-university-system")))
+                .andExpect(jsonPath("$.readVersion", notNullValue()))
+                .andExpect(jsonPath("$.capabilities.typedValues", equalTo(true)))
+                .andExpect(jsonPath("$.capabilities.staticFeatures", equalTo(true)))
+                .andExpect(jsonPath("$.explorer[0].kind", equalTo("PROJECT_ROOT")))
+                .andExpect(jsonPath("$.classes[?(@.id == 'class-student')].attributes[0].definingClassifier.name",
+                        contains("Student")))
+                .andExpect(jsonPath("$.objects[?(@.id == 'obj-alice')].slots[0].valueStatus",
+                        contains("VALUE")))
+                .andExpect(jsonPath("$.objectAssociations[?(@.objectId == 'obj-alice')].relatedLinks",
+                        notNullValue()))
+                .andExpect(jsonPath("$.diagnostics", notNullValue()));
+    }
+
     private String createProject(String name) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/projects")
                         .contentType(MediaType.APPLICATION_JSON)

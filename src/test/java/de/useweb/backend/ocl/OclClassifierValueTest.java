@@ -20,6 +20,7 @@ import de.useweb.backend.domain.uml.UmlAttribute;
 import de.useweb.backend.domain.uml.UmlAttributeId;
 import de.useweb.backend.domain.uml.UmlClass;
 import de.useweb.backend.domain.uml.UmlClassId;
+import de.useweb.backend.domain.uml.UmlClassifierValue;
 import de.useweb.backend.domain.uml.UmlDataType;
 import de.useweb.backend.domain.uml.UmlDataTypeId;
 import de.useweb.backend.domain.uml.UmlDataTypeProperty;
@@ -39,6 +40,7 @@ import de.useweb.backend.ocl.typecheck.OclType;
 import de.useweb.backend.ocl.typecheck.OclTypeChecker;
 import de.useweb.backend.ocl.typecheck.TypeEnvironment;
 import de.useweb.backend.ocl.value.ClassifierValue;
+import de.useweb.backend.ocl.value.IntegerValue;
 import de.useweb.backend.ocl.value.RealValue;
 
 class OclClassifierValueTest {
@@ -85,6 +87,7 @@ class OclClassifierValueTest {
         assertThat(classifier.qualifiedName()).isEqualTo("core::Invoice");
         assertThat(type("self.oclType()", new TypeEnvironment(fixture.model(), fixture.contextClass())).kind())
                 .isEqualTo(OclType.Kind.OCL_TYPE);
+        assertThat(evaluate("self.oclType().nextInvoiceNumber", context)).isEqualTo(new IntegerValue(1043));
     }
 
     private OclType type(String expression, TypeEnvironment environment) {
@@ -115,7 +118,11 @@ class OclClassifierValueTest {
                 List.of(new UmlDataTypeProperty("property-amount", "amount", UmlType.REAL)), billing.id());
         UmlAttribute price = new UmlAttribute(new UmlAttributeId("attribute-price"), "price",
                 UmlType.dataType("billing::Money"));
-        UmlClass invoice = new UmlClass(new UmlClassId("class-invoice"), "Invoice", List.of(price), List.of(),
+        UmlAttribute nextNumber = new UmlAttribute(new UmlAttributeId("attribute-next-number"),
+                "nextInvoiceNumber", UmlType.INTEGER, false, null, null,
+                de.useweb.backend.domain.uml.UmlVisibility.PUBLIC, List.of(), true,
+                new UmlClassifierValue(UmlType.INTEGER, 1043));
+        UmlClass invoice = new UmlClass(new UmlClassId("class-invoice"), "Invoice", List.of(price, nextNumber), List.of(),
                 false, List.of(), de.useweb.backend.domain.uml.UmlVisibility.PUBLIC, core.id());
         UmlModel model = new UmlModel(new UmlModelId("model-b13"), "B13", List.of(invoice), List.of(), List.of(),
                 List.of(new UmlEnumeration(new UmlEnumerationId("enum-billing-status"), "Status",

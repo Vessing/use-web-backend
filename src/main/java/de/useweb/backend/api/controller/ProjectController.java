@@ -22,12 +22,14 @@ import de.useweb.backend.api.dto.project.ImportProjectRequestDto;
 import de.useweb.backend.api.dto.project.ImportProjectResponseDto;
 import de.useweb.backend.api.dto.project.ProjectDto;
 import de.useweb.backend.api.dto.project.ProjectSummaryDto;
+import de.useweb.backend.api.dto.projection.ProjectReadModelDto;
 import de.useweb.backend.api.mapper.ProjectDtoMapper;
 import de.useweb.backend.application.modeltext.ModelTextApplicationService;
 import de.useweb.backend.application.project.DashboardProjectService;
 import de.useweb.backend.application.project.ProjectImportService;
 import de.useweb.backend.application.project.ProjectService;
 import de.useweb.backend.application.project.RecentProjectService;
+import de.useweb.backend.application.projection.ProjectReadModelService;
 import de.useweb.backend.domain.project.ProjectId;
 
 @RestController
@@ -39,18 +41,21 @@ public class ProjectController {
     private final ProjectImportService projectImportService;
     private final RecentProjectService recentProjectService;
     private final ModelTextApplicationService modelTextApplicationService;
+    private final ProjectReadModelService projectReadModelService;
 
     public ProjectController(
             DashboardProjectService dashboardProjectService,
             ProjectService projectService,
             ProjectImportService projectImportService,
             RecentProjectService recentProjectService,
-            ModelTextApplicationService modelTextApplicationService) {
+            ModelTextApplicationService modelTextApplicationService,
+            ProjectReadModelService projectReadModelService) {
         this.dashboardProjectService = dashboardProjectService;
         this.projectService = projectService;
         this.projectImportService = projectImportService;
         this.recentProjectService = recentProjectService;
         this.modelTextApplicationService = modelTextApplicationService;
+        this.projectReadModelService = projectReadModelService;
     }
 
     @PostMapping
@@ -79,6 +84,11 @@ public class ProjectController {
     @GetMapping("/{projectId}")
     public ProjectDto loadProject(@PathVariable String projectId) {
         return ProjectDtoMapper.toDto(projectService.loadProject(new ProjectId(projectId)));
+    }
+
+    @GetMapping("/{projectId}/read-model")
+    public ProjectReadModelDto readModel(@PathVariable String projectId) {
+        return projectReadModelService.get(new ProjectId(projectId));
     }
 
     @PutMapping("/{projectId}")

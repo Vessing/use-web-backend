@@ -10,6 +10,8 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 import de.useweb.backend.api.dto.project.ProjectDto;
+import de.useweb.backend.api.dto.command.AssociationClassInstanceAggregateDto;
+import de.useweb.backend.api.dto.command.AssociationClassInstanceDraftDto;
 import de.useweb.backend.api.dto.snapshot.ObjectInstanceDto;
 import de.useweb.backend.api.dto.snapshot.ObjectLinkDto;
 import de.useweb.backend.api.dto.snapshot.ObjectLinkEndValueDto;
@@ -18,6 +20,7 @@ import de.useweb.backend.api.dto.snapshot.SlotDto;
 import de.useweb.backend.api.dto.snapshot.SlotValueDto;
 import de.useweb.backend.api.mapper.ProjectDtoMapper;
 import de.useweb.backend.application.project.ProjectService;
+import de.useweb.backend.application.uml.StructuredUmlTypeService;
 import de.useweb.backend.domain.layout.DiagramLayout;
 import de.useweb.backend.domain.layout.LayoutInformation;
 import de.useweb.backend.domain.project.Project;
@@ -45,7 +48,7 @@ import de.useweb.backend.domain.uml.UmlType;
 import de.useweb.backend.error.ObjectModelException;
 import de.useweb.backend.ocl.definition.OclDefinitionEvaluationException;
 import de.useweb.backend.ocl.definition.OclDefinitionService;
-import de.useweb.backend.ocl.definition.OclModelDefinitionFactory;
+import de.useweb.backend.ocl.definition.OclProjectDefinitionFactory;
 import de.useweb.backend.ocl.value.BooleanValue;
 import de.useweb.backend.ocl.value.EnumValue;
 import de.useweb.backend.ocl.value.IntegerValue;
@@ -63,6 +66,7 @@ public class ObjectModelService {
     private static final String INVALID_LINK = "INVALID_LINK";
 
     private final ProjectService projectService;
+    private final StructuredUmlTypeService structuredTypes = new StructuredUmlTypeService();
 
     public ObjectModelService(ProjectService projectService) {
         this.projectService = projectService;
@@ -74,32 +78,8 @@ public class ObjectModelService {
 
     public ObjectInstanceDto createObject(ProjectId projectId, ObjectInstanceDto input) {
         Project project = projectService.loadProject(projectId);
-        UmlModel umlModel = project.umlModel();
         ObjectModel objectModel = project.objectModel();
-        UmlClass umlClass = requireClass(umlModel, new UmlClassId(input.classId()));
-        if (umlClass.abstractClass()) {
-            throw error(TYPE_ERROR, "Cannot instantiate abstract class: " + umlClass.name(),
-                    "Von einer abstrakten Klasse kann kein Objekt erzeugt werden.",
-                    Map.of("classId", umlClass.id().value()));
-        }
-        String objectName = requireName(input.name(), "objectName");
-        requireUniqueObjectName(objectModel, objectName, null);
-
-        List<Slot> slots = initialSlots(umlModel, umlClass);
-        for (SlotDto slotDto : safeList(input.slots())) {
-            Slot slot = slotFromDto(slotDto, umlModel, umlClass);
-            slots = replaceSlot(slots, slot);
-        }
-
-        ObjectInstanceId objectId = new ObjectInstanceId(idOrGenerated(input.id(), "obj"));
-        ObjectInstance draft = new ObjectInstance(objectId, objectName, umlClass.id(), slots);
-        slots = applyInitValues(umlModel, objectModel, draft, slots);
-
-        ObjectInstance object = new ObjectInstance(
-                objectId,
-                objectName,
-                umlClass.id(),
-                slots);
+        ObjectInstance object = validatedObject(project, objectModel, input, null, null);
 
         ObjectModel updatedObjectModel = new ObjectModel(
                 objectModel.id(),
@@ -110,7 +90,60 @@ public class ObjectModelService {
         return ProjectDtoMapper.toDto(object);
     }
 
+    public AssociationClassInstanceAggregateDto createAssociationClassInstance(ProjectId projectId,
+            AssociationClassInstanceDraftDto input) {
+        Project project = projectService.loadProject(projectId);
+        ObjectModel current = project.objectModel();
+        AssociationClassAggregateParts parts = validatedAssociationClassAggregate(
+                project, current, input, null, null);
+        ObjectModel updated = new ObjectModel(current.id(), current.name(),
+                append(current.objects(), parts.object()), append(current.links(), parts.link()));
+        validateLinkCardinality(project.umlModel(), updated.links(), parts.link());
+        validateComposition(project.umlModel(), updated.links());
+        save(project, updated);
+        return new AssociationClassInstanceAggregateDto(
+                ProjectDtoMapper.toDto(parts.link()), ProjectDtoMapper.toDto(parts.object()));
+    }
+
+    public AssociationClassInstanceAggregateDto updateAssociationClassInstance(ProjectId projectId,
+            ObjectLinkId linkId, AssociationClassInstanceDraftDto input) {
+        Project project = projectService.loadProject(projectId);
+        ObjectModel current = project.objectModel();
+        ObjectLink existingLink = requireLink(current, linkId);
+        if (existingLink.associationClassObjectId() == null) {
+            throw associationClassIdentityError(existingLink.associationId().value(), null,
+                    "The selected object link has no association-class identity");
+        }
+        ObjectInstanceId objectId = existingLink.associationClassObjectId();
+        requireObject(current, objectId);
+        AssociationClassAggregateParts parts = validatedAssociationClassAggregate(
+                project, current, input, linkId, objectId);
+        List<ObjectInstance> objects = current.objects().stream()
+                .map(candidate -> candidate.id().equals(objectId) ? parts.object() : candidate).toList();
+        List<ObjectLink> links = current.links().stream()
+                .map(candidate -> candidate.id().equals(linkId) ? parts.link() : candidate).toList();
+        validateLinkCardinality(project.umlModel(), links, parts.link());
+        validateComposition(project.umlModel(), links);
+        save(project, new ObjectModel(current.id(), current.name(), objects, links));
+        return new AssociationClassInstanceAggregateDto(
+                ProjectDtoMapper.toDto(parts.link()), ProjectDtoMapper.toDto(parts.object()));
+    }
+
     public ProjectDto deleteObject(ProjectId projectId, ObjectInstanceId objectId) {
+        Project project = projectService.loadProject(projectId);
+        List<String> dependentLinkIds = project.objectModel().links().stream()
+                .filter(link -> link.ends().stream().anyMatch(end -> end.objectId().equals(objectId))
+                        || objectId.equals(link.associationClassObjectId()))
+                .map(link -> link.id().value()).toList();
+        if (!dependentLinkIds.isEmpty()) {
+            throw error("DELETE_BLOCKED", "Object is still referenced by object links",
+                    "Verbleibende Objektlinks blockieren das direkte Loeschen.",
+                    Map.of("objectId", objectId.value(), "linkIds", dependentLinkIds));
+        }
+        return deleteObjectWithDependencies(projectId, objectId);
+    }
+
+    public ProjectDto deleteObjectWithDependencies(ProjectId projectId, ObjectInstanceId objectId) {
         Project project = projectService.loadProject(projectId);
         ObjectModel objectModel = project.objectModel();
         requireObject(objectModel, objectId);
@@ -164,6 +197,115 @@ public class ObjectModelService {
         Project project = projectService.loadProject(projectId);
         UmlModel umlModel = project.umlModel();
         ObjectModel objectModel = project.objectModel();
+        ObjectLink link = validatedLink(umlModel, objectModel, input, null);
+
+        List<ObjectLink> updatedLinks = append(objectModel.links(), link);
+        validateLinkCardinality(umlModel, updatedLinks, link);
+        validateComposition(umlModel, updatedLinks);
+        save(project, new ObjectModel(objectModel.id(), objectModel.name(), objectModel.objects(), updatedLinks));
+        return ProjectDtoMapper.toDto(link);
+    }
+
+    public ObjectLinkDto updateObjectLink(ProjectId projectId, ObjectLinkId linkId, ObjectLinkDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel umlModel = project.umlModel();
+        ObjectModel objectModel = project.objectModel();
+        requireLink(objectModel, linkId);
+        ObjectLinkDto normalized = new ObjectLinkDto(linkId.value(), input.associationId(), input.endValues(),
+                input.associationClassObjectId());
+        ObjectLink replacement = validatedLink(umlModel, objectModel, normalized, linkId);
+        List<ObjectLink> links = objectModel.links().stream()
+                .map(link -> link.id().equals(linkId) ? replacement : link)
+                .toList();
+        validateLinkCardinality(umlModel, links, replacement);
+        validateComposition(umlModel, links);
+        save(project, new ObjectModel(objectModel.id(), objectModel.name(), objectModel.objects(), links));
+        return ProjectDtoMapper.toDto(replacement);
+    }
+
+    private AssociationClassAggregateParts validatedAssociationClassAggregate(Project project,
+            ObjectModel current, AssociationClassInstanceDraftDto input, ObjectLinkId linkId,
+            ObjectInstanceId forcedObjectId) {
+        if (input == null || input.link() == null || input.associationClassObject() == null) {
+            throw error(TYPE_ERROR, "Association-class aggregate draft is incomplete",
+                    "Der Entwurf fuer Linkobjekt und Objektlink ist unvollstaendig.",
+                    Map.of("field", input == null || input.link() == null ? "link" : "associationClassObject"));
+        }
+        UmlAssociation association = requireAssociation(project.umlModel(),
+                new UmlAssociationId(input.link().associationId()));
+        if (association.associationClassId() == null) {
+            throw associationClassIdentityError(association.id().value(), null,
+                    "The selected association has no association class");
+        }
+        ObjectInstanceDto objectDraft = input.associationClassObject();
+        if (!association.associationClassId().value().equals(objectDraft.classId())) {
+            throw associationClassIdentityError(association.id().value(), objectDraft.id(),
+                    "Association-class object has the wrong classifier");
+        }
+        if (forcedObjectId != null && objectDraft.id() != null && !objectDraft.id().isBlank()
+                && !forcedObjectId.value().equals(objectDraft.id())) {
+            throw associationClassIdentityError(association.id().value(), objectDraft.id(),
+                    "Association-class object identity cannot change during update");
+        }
+        ObjectInstance object = validatedObject(project, current, objectDraft, forcedObjectId, forcedObjectId);
+        ObjectModel withObject = new ObjectModel(current.id(), current.name(),
+                forcedObjectId == null ? append(current.objects(), object)
+                        : current.objects().stream()
+                                .map(candidate -> candidate.id().equals(forcedObjectId) ? object : candidate).toList(),
+                current.links());
+        ObjectLinkDto linkDraft = input.link();
+        if (linkDraft.associationClassObjectId() != null && !linkDraft.associationClassObjectId().isBlank()
+                && !object.id().value().equals(linkDraft.associationClassObjectId())) {
+            throw associationClassIdentityError(association.id().value(), linkDraft.associationClassObjectId(),
+                    "Object-link identity does not match the aggregate object");
+        }
+        ObjectLinkDto normalized = new ObjectLinkDto(
+                linkId == null ? linkDraft.id() : linkId.value(), linkDraft.associationId(),
+                linkDraft.endValues(), object.id().value());
+        ObjectLink link = validatedLink(project.umlModel(), withObject, normalized, linkId);
+        return new AssociationClassAggregateParts(link, object);
+    }
+
+    private ObjectInstance validatedObject(Project project, ObjectModel objectModel, ObjectInstanceDto input,
+            ObjectInstanceId forcedId, ObjectInstanceId ignoredId) {
+        if (input == null || input.classId() == null || input.classId().isBlank()) {
+            throw error(UNKNOWN_CLASS, "Object classifier is missing", "Der Classifier des Objekts fehlt.",
+                    Map.of("field", "classId"));
+        }
+        UmlModel umlModel = project.umlModel();
+        UmlClass umlClass = requireClass(umlModel, new UmlClassId(input.classId()));
+        if (umlClass.abstractClass()) {
+            throw error(TYPE_ERROR, "Cannot instantiate abstract class: " + umlClass.name(),
+                    "Von einer abstrakten Klasse kann kein Objekt erzeugt werden.",
+                    Map.of("classId", umlClass.id().value()));
+        }
+        String objectName = requireName(input.name(), "objectName");
+        requireUniqueObjectName(objectModel, objectName, ignoredId);
+        List<Slot> slots = initialSlots(umlModel, umlClass);
+        for (SlotDto slotDto : safeList(input.slots())) {
+            slots = replaceSlot(slots, slotFromDto(slotDto, umlModel, umlClass));
+        }
+        ObjectInstanceId objectId = forcedId == null
+                ? new ObjectInstanceId(idOrGenerated(input.id(), "obj")) : forcedId;
+        ObjectInstance draft = new ObjectInstance(objectId, objectName, umlClass.id(), slots);
+        slots = applyInitValues(project, objectModel, draft, slots);
+        return new ObjectInstance(objectId, objectName, umlClass.id(), slots);
+    }
+
+    private ObjectModelException associationClassIdentityError(String associationId, String objectId,
+            String message) {
+        Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("associationId", associationId);
+        if (objectId != null && !objectId.isBlank()) details.put("objectId", objectId);
+        return error("ASSOCIATION_CLASS_IDENTITY_VIOLATION", message,
+                "Linkobjekt und Objektlink besitzen keine konsistente Association-Class-Identitaet.", details);
+    }
+
+    private record AssociationClassAggregateParts(ObjectLink link, ObjectInstance object) {
+    }
+
+    private ObjectLink validatedLink(UmlModel umlModel, ObjectModel objectModel, ObjectLinkDto input,
+            ObjectLinkId ignoredLinkId) {
         UmlAssociation association = requireAssociation(umlModel, new UmlAssociationId(input.associationId()));
         List<ObjectLinkEndValueDto> endValues = safeList(input.endValues());
         if (endValues.size() != association.ends().size()
@@ -184,23 +326,67 @@ public class ObjectModelService {
                 new ObjectLinkId(idOrGenerated(input.id(), "link")),
                 association.id(),
                 ends,
-                associationClassObject(umlModel, association, objectModel, input.associationClassObjectId()));
+                associationClassObject(umlModel, association, objectModel, input.associationClassObjectId(), ignoredLinkId));
 
-        if (objectModel.links().stream().anyMatch(existing -> sameLink(existing, link))) {
-            throw error(INVALID_LINK, "Duplicate object link", "Dieser Objektlink existiert bereits.",
-                    Map.of("associationId", association.id().value()));
+        List<String> duplicateIds = objectModel.links().stream().filter(existing -> !existing.id().equals(ignoredLinkId))
+                .filter(existing -> sameLink(existing, link)).map(existing -> existing.id().value()).toList();
+        if (!duplicateIds.isEmpty() && association.ends().stream().anyMatch(UmlAssociationEnd::unique)) {
+            throw error("OBJECT_LINK_DUPLICATE", "Duplicate object link violates unique association-end semantics",
+                    "Die Endzuordnung ist in diesem Unique-Navigationsbereich bereits vorhanden.",
+                    Map.of("associationId", association.id().value(), "conflictingLinkIds", duplicateIds));
         }
+        return link;
+    }
 
-        List<ObjectLink> updatedLinks = append(objectModel.links(), link);
-        validateComposition(umlModel, updatedLinks);
-        save(project, new ObjectModel(objectModel.id(), objectModel.name(), objectModel.objects(), updatedLinks));
-        return ProjectDtoMapper.toDto(link);
+    private void validateLinkCardinality(UmlModel model, List<ObjectLink> links, ObjectLink changedLink) {
+        UmlAssociation association = requireAssociation(model, changedLink.associationId());
+        for (UmlAssociationEnd targetEnd : association.ends()) {
+            Integer upper = targetEnd.multiplicity().upper();
+            if (targetEnd.multiplicity().unbounded() || upper == null) continue;
+            ObjectLinkEnd changedTarget = changedLink.ends().stream()
+                    .filter(value -> value.associationEndId().equals(targetEnd.id())).findFirst().orElseThrow();
+            List<ObjectLink> matching = links.stream().filter(link -> link.associationId().equals(association.id()))
+                    .filter(link -> association.ends().stream().filter(end -> !end.id().equals(targetEnd.id()))
+                            .allMatch(bindingEnd -> sameAssignedObject(link, changedLink, bindingEnd.id())))
+                    .filter(link -> link.ends().stream().filter(value -> value.associationEndId().equals(targetEnd.id()))
+                            .findFirst().map(value -> value.qualifierValues().equals(changedTarget.qualifierValues()))
+                            .orElse(false))
+                    .toList();
+            if (matching.size() > upper) {
+                throw error("MULTIPLICITY_VIOLATION", "Object-link update exceeds association-end upper bound",
+                        "Die Endzuordnung ueberschreitet die obere Multiplizitaetsgrenze.",
+                        Map.of("associationId", association.id().value(), "associationEndId", targetEnd.id().value(),
+                                "expectedUpper", upper, "actualCount", matching.size(),
+                                "linkIds", matching.stream().map(value -> value.id().value()).toList()));
+            }
+        }
+    }
+
+    private boolean sameAssignedObject(ObjectLink left, ObjectLink right, UmlAssociationEndId endId) {
+        ObjectInstanceId leftObject = left.ends().stream().filter(value -> value.associationEndId().equals(endId))
+                .map(ObjectLinkEnd::objectId).findFirst().orElse(null);
+        ObjectInstanceId rightObject = right.ends().stream().filter(value -> value.associationEndId().equals(endId))
+                .map(ObjectLinkEnd::objectId).findFirst().orElse(null);
+        return java.util.Objects.equals(leftObject, rightObject);
     }
 
     public ProjectDto deleteObjectLink(ProjectId projectId, ObjectLinkId linkId) {
         Project project = projectService.loadProject(projectId);
         ObjectModel objectModel = project.objectModel();
         ObjectLink removed = requireLink(objectModel, linkId);
+        if (removed.associationClassObjectId() != null) {
+            List<String> dependentLinks = objectModel.links().stream()
+                    .filter(link -> !link.id().equals(linkId))
+                    .filter(link -> link.ends().stream().anyMatch(end -> end.objectId().equals(removed.associationClassObjectId()))
+                            || removed.associationClassObjectId().equals(link.associationClassObjectId()))
+                    .map(link -> link.id().value()).toList();
+            if (!dependentLinks.isEmpty()) {
+                throw error("DELETE_BLOCKED", "Association-class object is referenced by other links",
+                        "Weitere Objektlinks referenzieren die Association-Class-Instanz.",
+                        Map.of("linkId", linkId.value(), "associationClassObjectId",
+                                removed.associationClassObjectId().value(), "blockingLinkIds", dependentLinks));
+            }
+        }
         List<ObjectLink> links = objectModel.links().stream()
                 .filter(link -> !link.id().equals(linkId))
                 .toList();
@@ -219,7 +405,7 @@ public class ObjectModelService {
         return umlModel.typeConformanceOrder(umlClass.id()).stream()
                 .map(umlModel::findClass).flatMap(java.util.Optional::stream)
                 .flatMap(type -> type.attributes().stream())
-                .filter(attribute -> !attribute.derived())
+                .filter(attribute -> !attribute.derived() && !attribute.staticAttribute())
                 .map(attribute -> new Slot(
                         new SlotId("slot-" + UUID.randomUUID()),
                         attribute.id(),
@@ -227,9 +413,10 @@ public class ObjectModelService {
                 .toList();
     }
 
-    private List<Slot> applyInitValues(UmlModel model, ObjectModel snapshot, ObjectInstance draft,
+    private List<Slot> applyInitValues(Project project, ObjectModel snapshot, ObjectInstance draft,
             List<Slot> slots) {
-        var definitions = new OclModelDefinitionFactory().definitions(model);
+        UmlModel model = project.umlModel();
+        var definitions = new OclProjectDefinitionFactory().definitions(project);
         if (definitions.stream().noneMatch(definition ->
                 definition.kind() == de.useweb.backend.ocl.definition.OclDefinitionKind.INIT)) {
             return slots;
@@ -282,80 +469,36 @@ public class ObjectModelService {
                     "Abgeleitete Attribute können nicht direkt gesetzt werden.",
                     Map.of("attributeId", attribute.id().value(), "attributeName", attribute.name()));
         }
-        SlotValue value = slotValue(input.value(), attribute, umlModel);
+        if (attribute.staticAttribute()) {
+            throw error("STATIC_FEATURE_HAS_NO_OBJECT_SLOT",
+                    "Static attribute must not be represented by an object slot: " + attribute.name(),
+                    "Statische Attribute besitzen keinen Objekt-Slot.",
+                    Map.of("classId", umlClass.id().value(), "attributeId", attribute.id().value(),
+                            "attributeName", attribute.name()));
+        }
+        SlotValue value = slotValue(input.value(), attribute, umlModel, umlClass);
         return new Slot(new SlotId(idOrGenerated(input.id(), "slot")), attribute.id(), value);
     }
 
-    private SlotValue slotValue(SlotValueDto input, UmlAttribute attribute, UmlModel umlModel) {
+    private SlotValue slotValue(SlotValueDto input, UmlAttribute attribute, UmlModel umlModel, UmlClass contextClass) {
         if (input == null) {
             return new SlotValue(null, attribute.type());
         }
-        if (!attribute.type().name().equals(input.type())) {
-            throw invalidSlotValue(attribute, input.type(), input.value());
-        }
-        Object value = input.value();
-        if (value == null) {
-            return new SlotValue(null, attribute.type());
-        }
-        UmlType attributeType = attribute.type();
-        if (attributeType.primitiveType().isEmpty()) {
-            var enumeration = umlModel.findEnumerationByName(attributeType.name());
-            if (enumeration.isPresent() && value instanceof String literal
-                    && enumeration.get().containsLiteral(literal)) {
-                return new SlotValue(literal, attributeType);
+        try {
+            var expected = structuredTypes.resolve(umlModel, attribute.type().name(), contextClass, false);
+            var actual = structuredTypes.resolve(umlModel, input.type(), contextClass, false);
+            if (!expected.umlType().name().equals(actual.umlType().name())) {
+                throw invalidSlotValue(attribute, input.type(), input.value());
             }
-            var dataType = umlModel.findDataTypeByName(attributeType.name());
-            if (dataType.isPresent() && value instanceof Map<?, ?> structured) {
-                Map<String, Object> normalized = new java.util.LinkedHashMap<>();
-                if (structured.size() != dataType.get().properties().size()) {
-                    throw invalidSlotValue(attribute, input.type(), value);
-                }
-                for (var property : dataType.get().properties()) {
-                    Object propertyValue = structured.get(property.name());
-                    if (!validValue(propertyValue, property.type(), umlModel)) {
-                        throw invalidSlotValue(attribute, input.type(), value);
-                    }
-                    normalized.put(property.name(), propertyValue);
-                }
-                return new SlotValue(java.util.Collections.unmodifiableMap(normalized), attributeType);
-            }
-            throw error(INVALID_SLOT_VALUE, "Object-valued slots are not supported in the MVP",
-                    "Objektwertige Slots werden im MVP nicht unterstützt.",
-                    Map.of("attributeId", attribute.id().value(), "type", attributeType.name()));
+            Object normalized = structuredTypes.normalizeValue(input.value(), expected, "value");
+            return new SlotValue(normalized, expected.umlType());
+        } catch (StructuredUmlTypeService.TypeException exception) {
+            throw error(INVALID_SLOT_VALUE, exception.getMessage(), "Der Slot-Wert passt nicht zum Attributtyp.",
+                    Map.of("attributeId", attribute.id().value(), "attributeName", attribute.name(),
+                            "expectedType", attribute.type().name(), "actualType",
+                            input.type() == null ? "null" : input.type(), "fieldPath", exception.path(),
+                            "reason", exception.reason(), "actualValue", String.valueOf(exception.actualValue())));
         }
-        PrimitiveType primitiveType = attributeType.primitiveType().orElseThrow();
-        boolean valid = switch (primitiveType) {
-            case STRING -> value instanceof String;
-            case INTEGER -> value instanceof Integer || value instanceof Long;
-            case REAL -> value instanceof Number;
-            case BOOLEAN -> value instanceof Boolean;
-        };
-        if (!valid) {
-            throw invalidSlotValue(attribute, input.type(), value);
-        }
-        Object normalizedValue = primitiveType == PrimitiveType.INTEGER && value instanceof Long longValue
-                ? Math.toIntExact(longValue)
-                : value;
-        return new SlotValue(normalizedValue, attributeType);
-    }
-
-    private boolean validValue(Object value, UmlType type, UmlModel model) {
-        if (value == null) return true;
-        if (type.primitiveType().isPresent()) {
-            return switch (type.primitiveType().orElseThrow()) {
-                case STRING -> value instanceof String;
-                case INTEGER -> value instanceof Integer || value instanceof Long;
-                case REAL -> value instanceof Number;
-                case BOOLEAN -> value instanceof Boolean;
-            };
-        }
-        var enumeration = model.findEnumerationByName(type.name());
-        if (enumeration.isPresent()) return value instanceof String literal && enumeration.get().containsLiteral(literal);
-        var dataType = model.findDataTypeByName(type.name());
-        if (dataType.isEmpty() || !(value instanceof Map<?, ?> structured)
-                || structured.size() != dataType.get().properties().size()) return false;
-        return dataType.get().properties().stream().allMatch(property -> structured.containsKey(property.name())
-                && validValue(structured.get(property.name()), property.type(), model));
     }
 
     private ObjectLinkEnd linkEnd(UmlModel umlModel, UmlAssociation association, ObjectModel objectModel,
@@ -475,7 +618,7 @@ public class ObjectModelService {
     }
 
     private ObjectInstanceId associationClassObject(UmlModel model, UmlAssociation association,
-            ObjectModel objectModel, String inputObjectId) {
+            ObjectModel objectModel, String inputObjectId, ObjectLinkId ignoredLinkId) {
         if (association.associationClassId() == null) {
             if (inputObjectId != null && !inputObjectId.isBlank()) {
                 throw error(INVALID_LINK, "A normal association cannot bind an association-class object",
@@ -496,7 +639,8 @@ public class ObjectModelService {
                     "Das Linkobjekt besitzt nicht die verknüpfte Association Class.",
                     Map.of("objectId", inputObjectId, "expectedClassId", association.associationClassId().value()));
         }
-        if (objectModel.links().stream().anyMatch(link -> object.id().equals(link.associationClassObjectId()))) {
+        if (objectModel.links().stream().filter(link -> !link.id().equals(ignoredLinkId))
+                .anyMatch(link -> object.id().equals(link.associationClassObjectId()))) {
             throw error(INVALID_LINK, "Association-class object already identifies another link",
                     "Das Linkobjekt ist bereits mit einem anderen Link verbunden.", Map.of("objectId", inputObjectId));
         }
@@ -605,7 +749,8 @@ public class ObjectModelService {
                 project.modelText(),
                 project.umlModel(),
                 updatedObjectModel,
-                updatedLayout));
+                updatedLayout,
+                project.definitions()));
     }
 
     private LayoutInformation pruneLayout(LayoutInformation layout, Set<String> removedNodeIds, Set<String> removedEdgeIds) {

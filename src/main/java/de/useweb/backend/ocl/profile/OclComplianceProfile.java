@@ -49,7 +49,7 @@ public record OclComplianceProfile(
                         feature("OCL-PROFILE-006", "Control and binding", OclFeatureStatus.SUPPORTED,
                                 "Clauses 8-10", "if-then-else and let expressions are supported with lexical scopes."),
                         feature("OCL-PROFILE-007", "Model navigation", OclFeatureStatus.PARTIAL,
-                                "Clauses 8-10", "Attribute and navigable association-end chains are implemented; remaining redefinition cases are not claimed as verified."),
+                                "Clauses 8-10", "Attribute and navigable association-end chains plus explicit attribute and operation redefinition dispatch are implemented; optional non-navigable access remains excluded."),
                         feature("OCL-PROFILE-008", "Extended types", OclFeatureStatus.SUPPORTED,
                                 "Clauses 8 and 11", "Tuples, enumerations, UnlimitedNatural, inheritance and runtime type operations."),
                         feature("OCL-PROFILE-009", "allInstances", OclFeatureStatus.PARTIAL,

@@ -11,8 +11,10 @@ import de.useweb.backend.api.dto.layout.LayoutDto;
 import de.useweb.backend.api.dto.layout.NodeLayoutDto;
 import de.useweb.backend.api.dto.layout.ViewportDto;
 import de.useweb.backend.api.dto.modeltext.ModelTextDto;
+import de.useweb.backend.api.dto.modeltext.ModelTextSourceProvenanceDto;
 import de.useweb.backend.api.dto.ocl.OclExpressionDto;
 import de.useweb.backend.api.dto.ocl.SourceRangeDto;
+import de.useweb.backend.api.dto.ocl.OclDefinitionElementDto;
 import de.useweb.backend.api.dto.project.ProjectDto;
 import de.useweb.backend.api.dto.project.ProjectMetadataDto;
 import de.useweb.backend.api.dto.project.ProjectSummaryDto;
@@ -30,6 +32,7 @@ import de.useweb.backend.api.dto.uml.UmlAttributeDto;
 import de.useweb.backend.api.dto.uml.UmlClassDto;
 import de.useweb.backend.api.dto.uml.UmlInvariantDto;
 import de.useweb.backend.api.dto.uml.UmlEnumerationDto;
+import de.useweb.backend.api.dto.uml.UmlEnumerationLiteralDto;
 import de.useweb.backend.api.dto.uml.UmlDataTypeDto;
 import de.useweb.backend.api.dto.uml.UmlDataTypePropertyDto;
 import de.useweb.backend.api.dto.uml.UmlModelDto;
@@ -50,8 +53,11 @@ import de.useweb.backend.domain.layout.NodeLayout;
 import de.useweb.backend.domain.layout.Point;
 import de.useweb.backend.domain.layout.Viewport;
 import de.useweb.backend.domain.modeltext.ModelText;
+import de.useweb.backend.domain.modeltext.ModelTextSourceProvenance;
 import de.useweb.backend.domain.ocl.OclExpression;
 import de.useweb.backend.domain.ocl.OclExpressionId;
+import de.useweb.backend.domain.ocl.OclDefinitionElement;
+import de.useweb.backend.domain.ocl.OclDefinitionElementId;
 import de.useweb.backend.domain.project.Project;
 import de.useweb.backend.domain.project.ProjectId;
 import de.useweb.backend.domain.project.ProjectMetadata;
@@ -79,9 +85,12 @@ import de.useweb.backend.domain.uml.UmlAttribute;
 import de.useweb.backend.domain.uml.UmlAttributeId;
 import de.useweb.backend.domain.uml.UmlClass;
 import de.useweb.backend.domain.uml.UmlClassId;
+import de.useweb.backend.domain.uml.UmlClassifierValue;
 import de.useweb.backend.domain.uml.UmlInvariant;
 import de.useweb.backend.domain.uml.UmlEnumeration;
 import de.useweb.backend.domain.uml.UmlEnumerationId;
+import de.useweb.backend.domain.uml.UmlEnumerationLiteral;
+import de.useweb.backend.domain.uml.UmlEnumerationLiteralId;
 import de.useweb.backend.domain.uml.UmlDataType;
 import de.useweb.backend.domain.uml.UmlDataTypeId;
 import de.useweb.backend.domain.uml.UmlDataTypeProperty;
@@ -124,7 +133,8 @@ public final class ProjectDtoMapper {
                 toDto(project.objectModel()),
                 toDto(project.layout()),
                 null,
-                Map.of());
+                Map.of(),
+                project.definitions().stream().map(definition -> toDto(definition, project.umlModel())).toList());
     }
 
     public static Project toDomain(ProjectDto dto) {
@@ -139,7 +149,43 @@ public final class ProjectDtoMapper {
                 toDomain(dto.modelText()),
                 toDomain(dto.umlModel()),
                 toDomain(dto.objectModel()),
-                dto.layout() == null ? LayoutInformation.empty() : toDomain(dto.layout()));
+                dto.layout() == null ? LayoutInformation.empty() : toDomain(dto.layout()),
+                safe(dto.definitions()).stream().map(ProjectDtoMapper::toDomain).toList());
+    }
+
+    public static OclDefinitionElementDto toDto(OclDefinitionElement definition, UmlModel model) {
+        String ownerName = definition.ownerKind() == OclDefinitionElement.OwnerKind.CLASS
+                ? model.findClass(new UmlClassId(definition.ownerId())).map(type -> type.qualifiedName(model)).orElse(definition.ownerId())
+                : model.findPackage(new UmlPackageId(definition.ownerId())).map(UmlPackage::qualifiedName).orElse(definition.ownerId());
+        var parsed = new de.useweb.backend.ocl.parser.OclParser().parse(definition.expression());
+        var range = definition.sourceRange() != null ? definition.sourceRange()
+                : parsed.ast() == null ? null : parsed.ast().sourceRange();
+        SourceRangeDto sourceRange = range == null ? null : new SourceRangeDto(range.start().line(), range.start().column(),
+                range.start().offset(), range.end().line(), range.end().column(), range.end().offset());
+        return new OclDefinitionElementDto(definition.id().value(), definition.kind().name(),
+                definition.ownerKind().name(), definition.ownerId(), ownerName, definition.name(),
+                ownerName + "::" + definition.name(), definition.resultType().name(),
+                definition.parameters().stream().map(ProjectDtoMapper::toDto).toList(),
+                definition.expression(), sourceRange);
+    }
+
+    public static OclDefinitionElement toDomain(OclDefinitionElementDto dto) {
+        de.useweb.backend.ocl.diagnostics.SourceRange range = dto.sourceRange() == null ? null
+                : new de.useweb.backend.ocl.diagnostics.SourceRange(
+                        new de.useweb.backend.ocl.diagnostics.SourcePosition(dto.sourceRange().startLine(),
+                                dto.sourceRange().startColumn(), dto.sourceRange().startOffset()),
+                        new de.useweb.backend.ocl.diagnostics.SourcePosition(dto.sourceRange().endLine(),
+                                dto.sourceRange().endColumn(), dto.sourceRange().endOffset()));
+        OclDefinitionElement value = new OclDefinitionElement(new OclDefinitionElementId(dto.id()),
+                OclDefinitionElement.Kind.valueOf(dto.kind()),
+                OclDefinitionElement.OwnerKind.valueOf(dto.ownerKind()), dto.ownerId(), dto.name(),
+                new UmlType(dto.resultType()), safe(dto.parameters()).stream().map(ProjectDtoMapper::toDomain).toList(),
+                dto.expression(), range);
+        if (value.sourceRange() != null) return value;
+        var parsed = new de.useweb.backend.ocl.parser.OclParser().parse(value.expression());
+        return new OclDefinitionElement(value.id(), value.kind(), value.ownerKind(), value.ownerId(), value.name(),
+                value.resultType(), value.parameters(), value.expression(),
+                parsed.ast() == null ? null : parsed.ast().sourceRange());
     }
 
     public static ProjectSummaryDto toSummaryDto(Project project) {
@@ -200,7 +246,10 @@ public final class ProjectDtoMapper {
                 modelText.sourceName(),
                 modelText.sourceOrigin(),
                 "LF",
-                modelText.updatedAt());
+                modelText.updatedAt(),
+                modelText.sources().stream().map(source -> new ModelTextSourceProvenanceDto(
+                        source.sourcePath(), source.importedBy(), source.selectedNames(), source.depth(), source.sha256()))
+                        .toList());
     }
 
     public static ModelText toDomain(ModelTextDto dto) {
@@ -213,7 +262,10 @@ public final class ProjectDtoMapper {
                 dto.version(),
                 dto.updatedAt(),
                 dto.sourceName(),
-                dto.sourceOrigin());
+                dto.sourceOrigin(),
+                safe(dto.sources()).stream().map(source -> new ModelTextSourceProvenance(
+                        source.sourcePath(), source.importedBy(), source.selectedNames(), source.depth(), source.sha256()))
+                        .toList());
     }
 
     public static UmlModelDto toDto(UmlModel model) {
@@ -279,24 +331,40 @@ public final class ProjectDtoMapper {
     private static UmlEnumerationDto toDto(UmlEnumeration enumeration, UmlModel model) {
         return new UmlEnumerationDto(enumeration.id().value(), enumeration.name(), enumeration.literals(),
                 enumeration.packageId() == null ? null : enumeration.packageId().value(),
-                model == null ? enumeration.name() : enumeration.qualifiedName(model));
+                model == null ? enumeration.name() : enumeration.qualifiedName(model), enumeration.visibility().name(),
+                enumeration.literalDefinitions().stream().map(literal ->
+                        new UmlEnumerationLiteralDto(literal.id().value(), literal.name())).toList());
     }
 
     public static UmlEnumeration toDomain(UmlEnumerationDto dto) {
-        return new UmlEnumeration(new UmlEnumerationId(dto.id()), dto.name(), dto.literals(),
-                dto.packageId() == null ? null : new UmlPackageId(dto.packageId()));
+        UmlEnumerationId enumerationId = new UmlEnumerationId(dto.id());
+        List<UmlEnumerationLiteral> definitions = safe(dto.literalDefinitions()).isEmpty()
+                ? legacyEnumerationLiterals(enumerationId, safe(dto.literals()))
+                : dto.literalDefinitions().stream().map(literal -> new UmlEnumerationLiteral(
+                        new UmlEnumerationLiteralId(literal.id()), literal.name())).toList();
+        return new UmlEnumeration(enumerationId, dto.name(), definitions,
+                dto.packageId() == null ? null : new UmlPackageId(dto.packageId()), visibility(dto.visibility()));
+    }
+
+    private static List<UmlEnumerationLiteral> legacyEnumerationLiterals(UmlEnumerationId enumerationId,
+            List<String> literals) {
+        int[] index = {0};
+        return literals.stream().map(name -> new UmlEnumerationLiteral(
+                new UmlEnumerationLiteralId(enumerationId.value() + ":literal:" + index[0]++), name)).toList();
     }
 
     public static UmlDataTypeDto toDto(UmlDataType dataType, UmlModel model) {
         return new UmlDataTypeDto(dataType.id().value(), dataType.name(), dataType.properties().stream()
                 .map(property -> new UmlDataTypePropertyDto(property.id(), property.name(), property.type().name()))
-                .toList(), dataType.packageId() == null ? null : dataType.packageId().value(), dataType.qualifiedName(model));
+                .toList(), dataType.packageId() == null ? null : dataType.packageId().value(), dataType.qualifiedName(model),
+                dataType.operations().stream().map(ProjectDtoMapper::toDto).toList());
     }
 
     public static UmlDataType toDomain(UmlDataTypeDto dto) {
         return new UmlDataType(new UmlDataTypeId(dto.id()), dto.name(), safe(dto.properties()).stream()
                 .map(property -> new UmlDataTypeProperty(property.id(), property.name(), new UmlType(property.type())))
-                .toList(), dto.packageId() == null ? null : new UmlPackageId(dto.packageId()));
+                .toList(), dto.packageId() == null ? null : new UmlPackageId(dto.packageId()),
+                safe(dto.operations()).stream().map(ProjectDtoMapper::toDomain).toList());
     }
 
     public static UmlPackageDto toDto(UmlPackage umlPackage) {
@@ -324,12 +392,19 @@ public final class ProjectDtoMapper {
 
     public static UmlAttributeDto toDto(UmlAttribute attribute) {
         return new UmlAttributeDto(attribute.id().value(), attribute.name(), attribute.type().name(),
-                attribute.derived(), attribute.deriveExpression(), attribute.initExpression(), attribute.visibility().name());
+                attribute.derived(), attribute.deriveExpression(), attribute.initExpression(), attribute.visibility().name(),
+                attribute.redefinedAttributeIds().stream().map(UmlAttributeId::value).toList(),
+                attribute.staticAttribute(), attribute.classifierValue() == null ? null
+                        : new SlotValueDto(attribute.classifierValue().valueType().name(),
+                                attribute.classifierValue().value()));
     }
 
     public static UmlAttribute toDomain(UmlAttributeDto dto) {
         return new UmlAttribute(new UmlAttributeId(dto.id()), dto.name(), typeOf(dto.type()),
-                Boolean.TRUE.equals(dto.derived()), dto.deriveExpression(), dto.initExpression(), visibility(dto.visibility()));
+                Boolean.TRUE.equals(dto.derived()), dto.deriveExpression(), dto.initExpression(), visibility(dto.visibility()),
+                safe(dto.redefinedAttributeIds()).stream().map(UmlAttributeId::new).toList(),
+                Boolean.TRUE.equals(dto.staticAttribute()), dto.classifierValue() == null ? null
+                        : new UmlClassifierValue(typeOf(dto.classifierValue().type()), dto.classifierValue().value()));
     }
 
     public static UmlOperationDto toDto(UmlOperation operation) {
@@ -339,10 +414,10 @@ public final class ProjectDtoMapper {
                 operation.returnType().name(),
                 operation.parameters().stream().map(ProjectDtoMapper::toDto).toList(),
                 operation.bodyExpression(), operation.visibility().name(),
-                operation.abstractOperation(), operation.query(), operation.contracts().stream()
+                operation.abstractOperation(), operation.query(), operation.staticOperation(), operation.contracts().stream()
                         .map(contract -> new UmlOperationContractDto(contract.id(), contract.name(),
                                 contract.kind().name(), contract.expression(), contract.enabled()))
-                        .toList());
+                        .toList(), safe(operation.redefinedOperationIds()).stream().map(UmlOperationId::value).toList());
     }
 
     public static UmlOperation toDomain(UmlOperationDto dto) {
@@ -352,11 +427,12 @@ public final class ProjectDtoMapper {
                 typeOf(dto.returnType()),
                 dto.parameters().stream().map(ProjectDtoMapper::toDomain).toList(),
                 dto.bodyExpression(), visibility(dto.visibility()),
-                Boolean.TRUE.equals(dto.abstractOperation()), Boolean.TRUE.equals(dto.query()), safe(dto.contracts()).stream()
+                Boolean.TRUE.equals(dto.abstractOperation()), Boolean.TRUE.equals(dto.query()),
+                Boolean.TRUE.equals(dto.staticOperation()), safe(dto.contracts()).stream()
                         .map(contract -> new UmlOperationContract(contract.id(), contract.name(),
                                 UmlOperationContract.Kind.valueOf(contract.kind().toUpperCase()),
                                 contract.expression(), !Boolean.FALSE.equals(contract.enabled())))
-                        .toList());
+                        .toList(), safe(dto.redefinedOperationIds()).stream().map(UmlOperationId::new).toList());
     }
 
     public static UmlParameterDto toDto(UmlParameter parameter) {
@@ -400,7 +476,7 @@ public final class ProjectDtoMapper {
                 navigationType(associationEnd), associationEnd.qualifiers().stream()
                         .map(qualifier -> new UmlQualifierDefinitionDto(qualifier.id().value(), qualifier.name(),
                                 qualifier.type().name(), qualifier.order()))
-                        .toList(), associationEnd.aggregationKind().name());
+                        .toList(), associationEnd.aggregationKind().name(), associationEnd.deriveExpression());
     }
 
     public static UmlAssociationEnd toDomain(UmlAssociationEndDto dto) {
@@ -419,7 +495,7 @@ public final class ProjectDtoMapper {
                         .map(qualifier -> new UmlQualifierDefinition(new UmlQualifierId(qualifier.id()),
                                 qualifier.name(), typeOf(qualifier.type()), qualifier.order() == null ? 0 : qualifier.order()))
                         .toList(), dto.aggregationKind() == null ? AggregationKind.NONE
-                                : AggregationKind.valueOf(dto.aggregationKind().toUpperCase()));
+                                : AggregationKind.valueOf(dto.aggregationKind().toUpperCase()), dto.deriveExpression());
     }
 
     private static String navigationType(UmlAssociationEnd end) {
@@ -449,7 +525,7 @@ public final class ProjectDtoMapper {
                 invariant.name(),
                 invariant.contextClassId().value(),
                 toDto(invariant.expression()),
-                invariant.enabled());
+                invariant.enabled(), invariant.contextVariableNames(), invariant.existential());
     }
 
     public static UmlInvariant toDomain(UmlInvariantDto dto) {
@@ -458,7 +534,7 @@ public final class ProjectDtoMapper {
                 dto.name(),
                 new UmlClassId(dto.contextClassId()),
                 toDomain(dto.expression()),
-                dto.enabled());
+                dto.enabled(), safe(dto.contextVariableNames()), Boolean.TRUE.equals(dto.existential()));
     }
 
     public static OclExpressionDto toDto(OclExpression expression) {

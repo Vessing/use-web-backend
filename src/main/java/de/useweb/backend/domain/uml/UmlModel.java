@@ -52,6 +52,7 @@ public record UmlModel(
         validateNamespaces(classes, enumerations, dataTypes, packages, imports);
         validateClassifierNames(classes, enumerations, dataTypes, packages);
         validateGeneralizations(classes);
+        validateFeatureRedefinitions(classes);
         validateInheritedFeatureResolution(classes);
         validateAssociationMetadata(classes, associations);
     }
@@ -543,41 +544,140 @@ public record UmlModel(
         UmlModelView view = new UmlModelView(classes);
         for (UmlClass umlClass : classes) {
             validateInheritedFeatures(view, umlClass, "ATTRIBUTE", UmlClass::attributes,
-                    attribute -> attribute.name());
+                    UmlAttribute::name, attribute -> attribute.id().value(),
+                    attribute -> attribute.redefinedAttributeIds().stream().map(UmlAttributeId::value).toList());
             validateInheritedFeatures(view, umlClass, "OPERATION", UmlClass::operations,
                     operation -> operation.name() + "(" + operation.parameters().stream()
-                            .map(parameter -> parameter.type().name()).reduce((a, b) -> a + "," + b).orElse("") + ")");
+                            .map(parameter -> parameter.type().name()).reduce((a, b) -> a + "," + b).orElse("") + ")",
+                    operation -> operation.id().value(),
+                    operation -> operation.redefinedOperationIds().stream().map(UmlOperationId::value).toList());
         }
     }
 
     private static <T> void validateInheritedFeatures(UmlModelView view, UmlClass target, String featureKind,
-            Function<UmlClass, List<T>> features, Function<T, String> key) {
-        Set<String> localKeys = features.apply(target).stream().map(key).collect(java.util.stream.Collectors.toSet());
-        Map<String, List<UmlClassId>> ownersByFeature = new java.util.LinkedHashMap<>();
+            Function<UmlClass, List<T>> features, Function<T, String> key, Function<T, String> id,
+            Function<T, List<String>> redefinedIds) {
+        Map<String, T> localByKey = features.apply(target).stream()
+                .collect(java.util.stream.Collectors.toMap(key, Function.identity()));
+        Map<String, List<OwnedFeature<T>>> inheritedByKey = new java.util.LinkedHashMap<>();
         for (UmlClassId ancestorId : view.superClassesOf(target.id())) {
             UmlClass ancestor = view.requireClass(ancestorId);
             for (T feature : features.apply(ancestor)) {
-                if (!localKeys.contains(key.apply(feature))) {
-                    ownersByFeature.computeIfAbsent(key.apply(feature), ignored -> new java.util.ArrayList<>())
-                            .add(ancestor.id());
-                }
+                inheritedByKey.computeIfAbsent(key.apply(feature), ignored -> new java.util.ArrayList<>())
+                        .add(new OwnedFeature<>(ancestor.id(), feature));
             }
         }
-        ownersByFeature.forEach((featureName, owners) -> {
-            List<UmlClassId> effectiveOwners = owners.stream().distinct()
-                    .filter(owner -> owners.stream().noneMatch(other -> !other.equals(owner)
-                            && view.isSubtypeOf(other, owner)))
+        inheritedByKey.forEach((featureName, inherited) -> {
+            List<OwnedFeature<T>> effective = inherited.stream()
+                    .filter(candidate -> inherited.stream().noneMatch(other -> !other.owner().equals(candidate.owner())
+                            && view.isSubtypeOf(other.owner(), candidate.owner())))
                     .toList();
-            if (effectiveOwners.size() > 1) {
+            if (effective.size() > 1) {
+                T local = localByKey.get(featureName);
+                Set<String> requiredTargets = effective.stream().map(entry -> id.apply(entry.feature()))
+                        .collect(java.util.stream.Collectors.toSet());
+                boolean resolved = local != null && new java.util.HashSet<>(redefinedIds.apply(local)).containsAll(requiredTargets);
+                if (resolved) return;
                 throw new UmlGeneralizationException("AMBIGUOUS_INHERITED_FEATURE",
                         "Ambiguous inherited " + featureKind.toLowerCase() + " '" + featureName
                                 + "' in class '" + target.name() + "'",
                         Map.of("classId", target.id().value(), "className", target.name(),
                                 "featureKind", featureKind, "featureName", featureName,
-                                "superClassIds", effectiveOwners.stream().map(UmlClassId::value).toList()));
+                                "superClassIds", effective.stream().map(entry -> entry.owner().value()).toList(),
+                                "featureIds", requiredTargets.stream().sorted().toList()));
             }
         });
     }
+
+    private static void validateFeatureRedefinitions(List<UmlClass> classes) {
+        UmlModelView view = new UmlModelView(classes);
+        Map<UmlAttributeId, List<OwnedFeature<UmlAttribute>>> attributes = new java.util.LinkedHashMap<>();
+        Map<UmlOperationId, List<OwnedFeature<UmlOperation>>> operations = new java.util.LinkedHashMap<>();
+        for (UmlClass owner : classes) {
+            for (UmlAttribute feature : owner.attributes()) {
+                attributes.computeIfAbsent(feature.id(), ignored -> new java.util.ArrayList<>())
+                        .add(new OwnedFeature<>(owner.id(), feature));
+            }
+            for (UmlOperation feature : owner.operations()) {
+                operations.computeIfAbsent(feature.id(), ignored -> new java.util.ArrayList<>())
+                        .add(new OwnedFeature<>(owner.id(), feature));
+            }
+        }
+        for (UmlClass owner : classes) {
+            for (UmlAttribute feature : owner.attributes()) {
+                for (UmlAttributeId targetId : feature.redefinedAttributeIds()) {
+                    List<OwnedFeature<UmlAttribute>> candidates = attributes.getOrDefault(targetId, List.of());
+                    if (candidates.isEmpty()) throw redefinitionError("UNKNOWN_REDEFINED_FEATURE", owner, "ATTRIBUTE",
+                            feature.id().value(), targetId.value());
+                    List<OwnedFeature<UmlAttribute>> inherited = candidates.stream()
+                            .filter(candidate -> view.superClassesOf(owner.id()).contains(candidate.owner())).toList();
+                    if (inherited.isEmpty()) {
+                        throw redefinitionError("INVALID_REDEFINITION_OWNER", owner, "ATTRIBUTE",
+                                feature.id().value(), targetId.value());
+                    }
+                    if (inherited.size() > 1) throw redefinitionError("DUPLICATE_FEATURE_ID", owner, "ATTRIBUTE",
+                            feature.id().value(), targetId.value());
+                    OwnedFeature<UmlAttribute> target = inherited.getFirst();
+                    if (!feature.name().equals(target.feature().name())
+                            || !typeConforms(feature.type(), target.feature().type(), classes)) {
+                        throw redefinitionError("INCOMPATIBLE_REDEFINED_FEATURE", owner, "ATTRIBUTE",
+                                feature.id().value(), targetId.value());
+                    }
+                }
+            }
+            for (UmlOperation feature : owner.operations()) {
+                for (UmlOperationId targetId : feature.redefinedOperationIds()) {
+                    List<OwnedFeature<UmlOperation>> candidates = operations.getOrDefault(targetId, List.of());
+                    if (candidates.isEmpty()) throw redefinitionError("UNKNOWN_REDEFINED_FEATURE", owner, "OPERATION",
+                            feature.id().value(), targetId.value());
+                    List<OwnedFeature<UmlOperation>> inherited = candidates.stream()
+                            .filter(candidate -> view.superClassesOf(owner.id()).contains(candidate.owner())).toList();
+                    if (inherited.isEmpty()) {
+                        throw redefinitionError("INVALID_REDEFINITION_OWNER", owner, "OPERATION",
+                                feature.id().value(), targetId.value());
+                    }
+                    if (inherited.size() > 1) throw redefinitionError("DUPLICATE_FEATURE_ID", owner, "OPERATION",
+                            feature.id().value(), targetId.value());
+                    OwnedFeature<UmlOperation> target = inherited.getFirst();
+                    if (!compatibleOperation(feature, target.feature(), classes)) {
+                        throw redefinitionError("INCOMPATIBLE_REDEFINED_FEATURE", owner, "OPERATION",
+                                feature.id().value(), targetId.value());
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean compatibleOperation(UmlOperation feature, UmlOperation target, List<UmlClass> classes) {
+        if (!feature.name().equals(target.name()) || feature.parameters().size() != target.parameters().size()
+                || !typeConforms(feature.returnType(), target.returnType(), classes)) return false;
+        for (int index = 0; index < feature.parameters().size(); index++) {
+            UmlParameter local = feature.parameters().get(index);
+            UmlParameter inherited = target.parameters().get(index);
+            if (!local.type().equals(inherited.type()) || local.direction() != inherited.direction()) return false;
+        }
+        return true;
+    }
+
+    private static boolean typeConforms(UmlType candidate, UmlType target, List<UmlClass> classes) {
+        if (candidate.equals(target)) return true;
+        UmlClass candidateClass = classes.stream().filter(type -> type.name().equals(candidate.name())).findFirst().orElse(null);
+        UmlClass targetClass = classes.stream().filter(type -> type.name().equals(target.name())).findFirst().orElse(null);
+        return candidateClass != null && targetClass != null && isSubtype(candidateClass.id(), targetClass.id(), classes);
+    }
+
+    private static UmlGeneralizationException redefinitionError(String code, UmlClass owner, String featureKind,
+            String featureId, String targetId) {
+        Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("classId", owner.id().value());
+        details.put("className", owner.name());
+        details.put("featureKind", featureKind);
+        details.put("featureId", featureId);
+        if (targetId != null) details.put("redefinedFeatureId", targetId);
+        return new UmlGeneralizationException(code, "Invalid explicit feature redefinition", details);
+    }
+
+    private record OwnedFeature<T>(UmlClassId owner, T feature) {}
 
     private record UmlModelView(List<UmlClass> classes) {
         UmlClass requireClass(UmlClassId id) {

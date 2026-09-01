@@ -48,6 +48,11 @@ import de.useweb.backend.ocl.resolution.OclCallResolver;
 public class OclTypeChecker {
 
     public OclTypecheckResult checkInvariant(UmlModel umlModel, UmlClassId contextClassId, OclAstNode ast) {
+        return checkInvariant(umlModel, contextClassId, ast, List.of());
+    }
+
+    public OclTypecheckResult checkInvariant(UmlModel umlModel, UmlClassId contextClassId, OclAstNode ast,
+            List<String> contextVariableNames) {
         Optional<UmlClass> contextClass = umlModel.findClass(contextClassId);
         if (contextClass.isEmpty()) {
             return OclTypecheckResult.failure(
@@ -55,8 +60,12 @@ public class OclTypeChecker {
                     List.of(OclDiagnostic.unknownClass(contextClassId.value(), ast.sourceRange())));
         }
 
+        Map<String, OclType> variables = new LinkedHashMap<>();
+        OclType contextType = OclType.classType(contextClass.get(), umlModel);
+        (contextVariableNames == null ? List.<String>of() : contextVariableNames)
+                .forEach(name -> variables.put(name, contextType));
         List<OclDiagnostic> diagnostics = new ArrayList<>();
-        OclType resultType = check(ast, new TypeEnvironment(umlModel, contextClass.get()), diagnostics);
+        OclType resultType = check(ast, new TypeEnvironment(umlModel, contextClass.get(), variables), diagnostics);
         if (diagnostics.isEmpty() && !resultType.conformsTo(OclType.BOOLEAN)) {
             diagnostics.add(typeError(
                     "An invariant expression must result in Boolean.",
@@ -598,12 +607,14 @@ public class OclTypeChecker {
     private OclType qualifiedPropertyAccessType(QualifiedPropertyAccessExpression expression,
             TypeEnvironment environment, List<OclDiagnostic> diagnostics) {
         OclType receiverType = check(expression.receiver(), environment, diagnostics);
-        if (receiverType.kind() != OclType.Kind.CLASS) {
+        OclType representedType = receiverType.kind() == OclType.Kind.OCL_TYPE
+                ? receiverType.classifierType() : receiverType;
+        if (representedType.kind() != OclType.Kind.CLASS) {
             diagnostics.add(typeError("Qualified navigation requires a class-valued receiver.",
                     expression.sourceRange(), List.of("ClassType"), receiverType));
             return OclType.INVALID;
         }
-        Optional<UmlClass> receiverClass = environment.findClass(receiverType.classId());
+        Optional<UmlClass> receiverClass = environment.findClass(representedType.classId());
         if (receiverClass.isEmpty()) {
             diagnostics.add(OclDiagnostic.unknownClass(receiverType.displayName(), expression.sourceRange()));
             return OclType.INVALID;

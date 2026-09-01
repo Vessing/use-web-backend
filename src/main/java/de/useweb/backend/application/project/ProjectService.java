@@ -132,6 +132,7 @@ public class ProjectService {
                 project.modelText(),
                 project.umlModel(),
                 project.objectModel(),
-                project.layout());
+                project.layout(),
+                project.definitions());
     }
 }

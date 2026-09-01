@@ -11,12 +11,15 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 import de.useweb.backend.api.dto.project.ProjectDto;
+import de.useweb.backend.api.dto.command.AssociationClassAggregateDto;
 import de.useweb.backend.api.dto.ocl.OclExpressionDto;
 import de.useweb.backend.api.dto.uml.MultiplicityDto;
 import de.useweb.backend.api.dto.uml.UmlAssociationDto;
 import de.useweb.backend.api.dto.uml.UmlAssociationEndDto;
 import de.useweb.backend.api.dto.uml.UmlAttributeDto;
 import de.useweb.backend.api.dto.uml.UmlClassDto;
+import de.useweb.backend.api.dto.uml.UmlDataTypeDto;
+import de.useweb.backend.api.dto.uml.UmlEnumerationDto;
 import de.useweb.backend.api.dto.uml.UmlInvariantDto;
 import de.useweb.backend.api.dto.uml.UmlModelDto;
 import de.useweb.backend.api.dto.uml.UmlOperationDto;
@@ -42,6 +45,14 @@ import de.useweb.backend.domain.uml.UmlAttribute;
 import de.useweb.backend.domain.uml.UmlAttributeId;
 import de.useweb.backend.domain.uml.UmlClass;
 import de.useweb.backend.domain.uml.UmlClassId;
+import de.useweb.backend.domain.uml.UmlClassifierValue;
+import de.useweb.backend.domain.uml.UmlDataType;
+import de.useweb.backend.domain.uml.UmlDataTypeId;
+import de.useweb.backend.domain.uml.UmlEnumeration;
+import de.useweb.backend.domain.uml.UmlEnumerationId;
+import de.useweb.backend.domain.uml.UmlEnumerationLiteral;
+import de.useweb.backend.domain.uml.UmlEnumerationLiteralId;
+import de.useweb.backend.domain.uml.UmlDataTypeProperty;
 import de.useweb.backend.domain.uml.UmlInvariant;
 import de.useweb.backend.domain.uml.UmlInvariantId;
 import de.useweb.backend.domain.uml.UmlGeneralizationException;
@@ -57,6 +68,8 @@ import de.useweb.backend.domain.uml.UmlPackage;
 import de.useweb.backend.domain.uml.UmlModelImport;
 import de.useweb.backend.domain.uml.UmlModelImportId;
 import de.useweb.backend.domain.uml.UmlVisibility;
+import de.useweb.backend.ocl.lexer.OclLexer;
+import de.useweb.backend.ocl.lexer.OclTokenType;
 import de.useweb.backend.error.UmlModelException;
 
 @Service
@@ -67,6 +80,7 @@ public class UmlModelService {
     private static final String UNKNOWN_ATTRIBUTE = "UNKNOWN_ATTRIBUTE";
 
     private final ProjectService projectService;
+    private final StructuredUmlTypeService structuredTypes = new StructuredUmlTypeService();
 
     public UmlModelService(ProjectService projectService) {
         this.projectService = projectService;
@@ -80,20 +94,25 @@ public class UmlModelService {
         Project project = projectService.loadProject(projectId);
         UmlModel model = project.umlModel();
         String name = requireName(input.name(), "className");
-        requireUniqueClassName(model, name, packageId(input.packageId()), null);
+        UmlPackageId packageId = packageId(input.packageId());
+        requireUniqueClassName(model, name, packageId, null);
+        UmlClassId classId = new UmlClassId(idOrGenerated(input.id(), "class"));
+        UmlClass typeContext = new UmlClass(classId, name, List.of(), List.of(), input.abstractClass(),
+                safeList(input.superClassIds()).stream().map(UmlClassId::new).toList(),
+                visibility(input.visibility()), packageId);
 
         UmlClass umlClass = new UmlClass(
-                new UmlClassId(idOrGenerated(input.id(), "class")),
+                classId,
                 name,
                 safeList(input.attributes()).stream()
-                        .map(attribute -> attributeWithGeneratedId(attribute, model))
+                        .map(attribute -> attributeWithGeneratedId(attribute, model, typeContext))
                         .toList(),
                 safeList(input.operations()).stream()
                         .map(operation -> operationWithGeneratedId(operation, model))
                         .toList(),
                 input.abstractClass(),
                 safeList(input.superClassIds()).stream().map(UmlClassId::new).toList(),
-                visibility(input.visibility()), packageId(input.packageId()));
+                visibility(input.visibility()), packageId);
 
         UmlModel updatedModel = validatedModel(model, append(model.classes(), umlClass));
         save(project, updatedModel);
@@ -243,7 +262,8 @@ public class UmlModelService {
                                 umlClass.name(),
                                 umlClass.attributes(),
                                 umlClass.operations().stream().filter(operation -> !operation.id().equals(operationId)).toList(),
-                                umlClass.abstractClass(), umlClass.superClassIds())
+                                umlClass.abstractClass(), umlClass.superClassIds(), umlClass.visibility(),
+                                umlClass.packageId())
                         : umlClass)
                 .toList();
 
@@ -296,6 +316,7 @@ public class UmlModelService {
         UmlModel model = project.umlModel();
         UmlClass owner = requireClass(model, classId);
         String name = requireName(input.name(), "attributeName");
+        validateStaticAttribute(input);
         if (owner.attributes().stream().anyMatch(attribute -> attribute.name().equals(name))) {
             throw error(TYPE_ERROR, "Duplicate attribute name: " + name, "Der Attributname ist in der Klasse bereits vorhanden.",
                     Map.of("classId", classId.value(), "attributeName", name));
@@ -303,8 +324,11 @@ public class UmlModelService {
         UmlAttribute attribute = new UmlAttribute(
                 new UmlAttributeId(idOrGenerated(input.id(), "attr")),
                 name,
-                requireKnownType(model, input.type(), false),
-                Boolean.TRUE.equals(input.derived()), input.deriveExpression(), input.initExpression());
+                requireKnownType(model, input.type(), owner, false),
+                Boolean.TRUE.equals(input.derived()), input.deriveExpression(), input.initExpression(),
+                visibility(input.visibility()), safeList(input.redefinedAttributeIds()).stream()
+                        .map(UmlAttributeId::new).toList(), Boolean.TRUE.equals(input.staticAttribute()),
+                classifierValue(input, model, owner));
 
         List<UmlClass> classes = model.classes().stream()
                 .map(umlClass -> umlClass.id().equals(classId)
@@ -322,9 +346,12 @@ public class UmlModelService {
         UmlModel model = project.umlModel();
         UmlClass owner = requireClass(model, classId);
         requireAttribute(owner, attributeId);
+        validateStaticAttribute(input);
         UmlAttribute replacement = new UmlAttribute(attributeId, requireName(input.name(), "attributeName"),
-                requireKnownType(model, input.type(), false), Boolean.TRUE.equals(input.derived()),
-                input.deriveExpression(), input.initExpression(), visibility(input.visibility()));
+                requireKnownType(model, input.type(), owner, false), Boolean.TRUE.equals(input.derived()),
+                input.deriveExpression(), input.initExpression(), visibility(input.visibility()),
+                safeList(input.redefinedAttributeIds()).stream().map(UmlAttributeId::new).toList(),
+                Boolean.TRUE.equals(input.staticAttribute()), classifierValue(input, model, owner));
         List<UmlClass> classes = model.classes().stream().map(umlClass -> umlClass.id().equals(classId)
                 ? new UmlClass(umlClass.id(), umlClass.name(), umlClass.attributes().stream()
                         .map(attribute -> attribute.id().equals(attributeId) ? replacement : attribute).toList(),
@@ -340,6 +367,7 @@ public class UmlModelService {
         Project project = projectService.loadProject(projectId);
         UmlModel model = project.umlModel();
         UmlClass owner = requireClass(model, classId);
+        validateOperationDraft(input);
         UmlOperation operation = operationWithGeneratedId(input, model);
         if (owner.operations().stream().anyMatch(existing -> sameOperationSignature(existing, operation))) {
             throw duplicateOperation(classId, operation);
@@ -361,12 +389,14 @@ public class UmlModelService {
         UmlModel model = project.umlModel();
         UmlClass owner = requireClass(model, classId);
         requireOperation(owner, operationId);
+        validateOperationDraft(input);
         UmlOperation replacement = new UmlOperation(operationId, requireName(input.name(), "operationName"),
                 requireKnownType(model, input.returnType(), true), safeList(input.parameters()).stream()
                         .map(parameter -> parameterWithGeneratedId(parameter, model)).toList(),
                 input.bodyExpression(), visibility(input.visibility()),
                 Boolean.TRUE.equals(input.abstractOperation()), Boolean.TRUE.equals(input.query()),
-                contracts(input));
+                Boolean.TRUE.equals(input.staticOperation()),
+                contracts(input), safeList(input.redefinedOperationIds()).stream().map(UmlOperationId::new).toList());
         if (owner.operations().stream().filter(operation -> !operation.id().equals(operationId))
                 .anyMatch(existing -> sameOperationSignature(existing, replacement))) {
             throw duplicateOperation(classId, replacement);
@@ -381,28 +411,102 @@ public class UmlModelService {
         return ProjectDtoMapper.toDto(replacement);
     }
 
+    public UmlClassDto updateFeatureRedefinition(ProjectId projectId, UmlClassId classId, String featureKind,
+            String localFeatureId, List<String> redefinedFeatureIds, List<String> supertypeIds) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlClass owner = requireClass(model, classId);
+        List<UmlAttribute> attributes = owner.attributes();
+        List<UmlOperation> operations = owner.operations();
+        if ("ATTRIBUTE".equals(featureKind)) {
+            UmlAttributeId featureId = new UmlAttributeId(localFeatureId);
+            UmlAttribute current = requireAttribute(owner, featureId);
+            UmlAttribute replacement = new UmlAttribute(current.id(), current.name(), current.type(), current.derived(),
+                    current.deriveExpression(), current.initExpression(), current.visibility(),
+                    redefinedFeatureIds.stream().map(UmlAttributeId::new).toList(), current.staticAttribute(),
+                    current.classifierValue());
+            attributes = attributes.stream().map(feature -> feature.id().equals(featureId) ? replacement : feature).toList();
+        } else if ("OPERATION".equals(featureKind)) {
+            UmlOperationId featureId = new UmlOperationId(localFeatureId);
+            UmlOperation current = requireOperation(owner, featureId);
+            UmlOperation replacement = new UmlOperation(current.id(), current.name(), current.returnType(),
+                    current.parameters(), current.bodyExpression(), current.visibility(), current.abstractOperation(),
+                    current.query(), current.staticOperation(), current.contracts(), redefinedFeatureIds.stream().map(UmlOperationId::new).toList());
+            operations = operations.stream().map(feature -> feature.id().equals(featureId) ? replacement : feature).toList();
+        } else {
+            throw error("INVALID_FEATURE_KIND", "Unknown feature kind: " + featureKind,
+                    "Die Feature-Art muss ATTRIBUTE oder OPERATION sein.", Map.of("featureKind", featureKind));
+        }
+        List<UmlClassId> nextSupertypes = supertypeIds == null ? owner.superClassIds()
+                : supertypeIds.stream().map(UmlClassId::new).toList();
+        UmlClass replacement = new UmlClass(owner.id(), owner.name(), attributes, operations, owner.abstractClass(),
+                nextSupertypes, owner.visibility(), owner.packageId());
+        List<UmlClass> classes = model.classes().stream()
+                .map(type -> type.id().equals(classId) ? replacement : type).toList();
+        UmlModel updated = validatedModel(model, classes);
+        save(project, updated);
+        return ProjectDtoMapper.toDto(updated).classes().stream().filter(type -> type.id().equals(classId.value()))
+                .findFirst().orElseThrow();
+    }
+
     public UmlPackageDto createPackage(ProjectId projectId, UmlPackageDto input) {
         Project project = projectService.loadProject(projectId);
         UmlModel model = project.umlModel();
-        UmlPackage umlPackage = new UmlPackage(new UmlPackageId(idOrGenerated(input.id(), "package")),
-                requireName(input.qualifiedName(), "qualifiedName"));
-        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(),
-                model.invariants(), model.enumerations(), append(model.packages(), umlPackage), model.imports(), model.dataTypes());
+        UmlPackage umlPackage = packageValue(new UmlPackageId(idOrGenerated(input.id(), "package")),
+                input.qualifiedName());
+        UmlModel updated = namespaceModel(model, append(model.packages(), umlPackage), model.imports());
         save(project, updated);
         return ProjectDtoMapper.toDto(umlPackage);
+    }
+
+    public UmlPackageDto updatePackage(ProjectId projectId, UmlPackageId packageId, UmlPackageDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlPackage current = model.findPackage(packageId).orElseThrow(() -> error("UNKNOWN_PACKAGE",
+                "Unknown package: " + packageId.value(), "Das Package existiert nicht.",
+                Map.of("packageId", packageId.value())));
+        UmlPackage replacement = packageValue(packageId, input.qualifiedName());
+        String oldPrefix = current.qualifiedName() + "::";
+        String newPrefix = replacement.qualifiedName() + "::";
+        if (replacement.qualifiedName().startsWith(oldPrefix)) {
+            throw error("PACKAGE_CYCLE", "A package cannot be moved below itself",
+                    "Ein Package kann nicht unter sich selbst verschoben werden.",
+                    Map.of("packageId", packageId.value(), "qualifiedName", replacement.qualifiedName()));
+        }
+        List<UmlPackage> packages = model.packages().stream().map(candidate -> {
+            if (candidate.id().equals(packageId)) return replacement;
+            if (candidate.qualifiedName().startsWith(oldPrefix)) {
+                return packageValue(candidate.id(), newPrefix + candidate.qualifiedName().substring(oldPrefix.length()));
+            }
+            return candidate;
+        }).toList();
+        UmlModel updated = namespaceModel(model, packages, model.imports());
+        save(project, updated);
+        return ProjectDtoMapper.toDto(replacement);
     }
 
     public UmlModelImportDto createImport(ProjectId projectId, UmlModelImportDto input) {
         Project project = projectService.loadProject(projectId);
         UmlModel model = project.umlModel();
-        UmlModelImport modelImport = new UmlModelImport(
-                new UmlModelImportId(idOrGenerated(input.id(), "import")),
-                new UmlPackageId(input.importingPackageId()), new UmlPackageId(input.importedPackageId()),
-                input.alias(), input.source(), input.provenance());
-        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(),
-                model.invariants(), model.enumerations(), model.packages(), append(model.imports(), modelImport), model.dataTypes());
+        UmlModelImport modelImport = importValue(new UmlModelImportId(idOrGenerated(input.id(), "import")), input);
+        UmlModel updated = namespaceModel(model, model.packages(), append(model.imports(), modelImport));
         save(project, updated);
         return ProjectDtoMapper.toDto(modelImport);
+    }
+
+    public UmlModelImportDto updateImport(ProjectId projectId, UmlModelImportId importId, UmlModelImportDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        if (model.imports().stream().noneMatch(modelImport -> modelImport.id().equals(importId))) {
+            throw error("UNKNOWN_IMPORT", "Unknown model import: " + importId.value(),
+                    "Der Modellimport existiert nicht.", Map.of("importId", importId.value()));
+        }
+        UmlModelImport replacement = importValue(importId, input);
+        List<UmlModelImport> imports = model.imports().stream()
+                .map(modelImport -> modelImport.id().equals(importId) ? replacement : modelImport).toList();
+        UmlModel updated = namespaceModel(model, model.packages(), imports);
+        save(project, updated);
+        return ProjectDtoMapper.toDto(replacement);
     }
 
     public ProjectDto deleteImport(ProjectId projectId, UmlModelImportId importId) {
@@ -419,6 +523,110 @@ public class UmlModelService {
         return ProjectDtoMapper.toDto(projectService.loadProject(projectId));
     }
 
+    public ProjectDto deletePackageWithDependencies(ProjectId projectId, UmlPackageId packageId) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlPackage target = model.findPackage(packageId).orElseThrow(() -> error("UNKNOWN_PACKAGE",
+                "Unknown package: " + packageId.value(), "Das Package existiert nicht.",
+                Map.of("packageId", packageId.value())));
+        String descendantPrefix = target.qualifiedName() + "::";
+        Set<UmlPackageId> removedPackageIds = model.packages().stream()
+                .filter(candidate -> candidate.id().equals(packageId)
+                        || candidate.qualifiedName().startsWith(descendantPrefix))
+                .map(UmlPackage::id).collect(java.util.stream.Collectors.toSet());
+        Set<UmlClassId> removedClassIds = model.classes().stream()
+                .filter(candidate -> candidate.packageId() != null && removedPackageIds.contains(candidate.packageId()))
+                .map(UmlClass::id).collect(java.util.stream.Collectors.toSet());
+        Set<UmlAssociationId> removedAssociationIds = model.associations().stream()
+                .filter(association -> association.associationClassId() != null
+                        && removedClassIds.contains(association.associationClassId())
+                        || association.ends().stream().anyMatch(end -> removedClassIds.contains(end.classId())))
+                .map(UmlAssociation::id).collect(java.util.stream.Collectors.toSet());
+        Set<String> removedInvariantIds = model.invariants().stream()
+                .filter(invariant -> removedClassIds.contains(invariant.contextClassId()))
+                .map(invariant -> invariant.id().value()).collect(java.util.stream.Collectors.toSet());
+        Set<String> removedObjectIds = project.objectModel().objects().stream()
+                .filter(object -> removedClassIds.contains(object.classId()))
+                .map(object -> object.id().value()).collect(java.util.stream.Collectors.toSet());
+
+        List<ObjectInstance> objects = project.objectModel().objects().stream()
+                .filter(object -> !removedObjectIds.contains(object.id().value())).toList();
+        List<ObjectLink> links = project.objectModel().links().stream()
+                .filter(link -> !removedAssociationIds.contains(link.associationId()))
+                .filter(link -> link.ends().stream().noneMatch(end -> removedObjectIds.contains(end.objectId().value())))
+                .filter(link -> link.associationClassObjectId() == null
+                        || !removedObjectIds.contains(link.associationClassObjectId().value()))
+                .toList();
+        Set<String> remainingLinkIds = links.stream().map(link -> link.id().value())
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> removedLinkIds = project.objectModel().links().stream().map(link -> link.id().value())
+                .filter(id -> !remainingLinkIds.contains(id)).collect(java.util.stream.Collectors.toSet());
+
+        UmlModel updatedModel = new UmlModel(model.id(), model.name(),
+                model.classes().stream().filter(candidate -> !removedClassIds.contains(candidate.id())).toList(),
+                model.associations().stream().filter(candidate -> !removedAssociationIds.contains(candidate.id())).toList(),
+                model.invariants().stream().filter(candidate -> !removedInvariantIds.contains(candidate.id().value())).toList(),
+                model.enumerations().stream().filter(candidate -> candidate.packageId() == null
+                        || !removedPackageIds.contains(candidate.packageId())).toList(),
+                model.packages().stream().filter(candidate -> !removedPackageIds.contains(candidate.id())).toList(),
+                model.imports().stream().filter(candidate -> !removedPackageIds.contains(candidate.importingPackageId())
+                        && !removedPackageIds.contains(candidate.importedPackageId())).toList(),
+                model.dataTypes().stream().filter(candidate -> candidate.packageId() == null
+                        || !removedPackageIds.contains(candidate.packageId())).toList());
+        Set<String> removedDefinitionIds = project.definitions().stream()
+                .filter(definition -> definition.ownerKind() == de.useweb.backend.domain.ocl.OclDefinitionElement.OwnerKind.PACKAGE
+                        && removedPackageIds.stream().anyMatch(id -> id.value().equals(definition.ownerId()))
+                        || definition.ownerKind() == de.useweb.backend.domain.ocl.OclDefinitionElement.OwnerKind.CLASS
+                        && removedClassIds.stream().anyMatch(id -> id.value().equals(definition.ownerId())))
+                .map(definition -> definition.id().value()).collect(java.util.stream.Collectors.toSet());
+        Set<String> removedNodeIds = union(removedPackageIds.stream().map(UmlPackageId::value)
+                        .collect(java.util.stream.Collectors.toSet()),
+                removedClassIds.stream().map(UmlClassId::value).collect(java.util.stream.Collectors.toSet()),
+                removedObjectIds);
+        Set<String> removedEdgeIds = union(removedAssociationIds.stream().map(UmlAssociationId::value)
+                        .collect(java.util.stream.Collectors.toSet()), removedInvariantIds, removedLinkIds,
+                removedDefinitionIds);
+        Project saved = projectService.saveProject(new Project(project.id(), project.metadata(), project.modelText(),
+                updatedModel, new ObjectModel(project.objectModel().id(), project.objectModel().name(), objects, links),
+                pruneLayout(project.layout(), removedNodeIds, removedEdgeIds),
+                project.definitions().stream().filter(value -> !removedDefinitionIds.contains(value.id().value())).toList()));
+        return ProjectDtoMapper.toDto(saved);
+    }
+
+    private UmlPackage packageValue(UmlPackageId id, String qualifiedName) {
+        try {
+            return new UmlPackage(id, requireName(qualifiedName, "qualifiedName"));
+        } catch (UmlModelException exception) {
+            throw exception;
+        } catch (IllegalArgumentException exception) {
+            throw error("INVALID_PACKAGE", exception.getMessage(), "Das Package ist ungueltig.",
+                    Map.of("packageId", id.value(), "qualifiedName", qualifiedName == null ? "" : qualifiedName));
+        }
+    }
+
+    private UmlModelImport importValue(UmlModelImportId id, UmlModelImportDto input) {
+        try {
+            return new UmlModelImport(id, new UmlPackageId(input.importingPackageId()),
+                    new UmlPackageId(input.importedPackageId()), input.alias(), input.source(), input.provenance());
+        } catch (IllegalArgumentException exception) {
+            throw error("INVALID_IMPORT", exception.getMessage(), "Der Modellimport ist ungueltig.",
+                    Map.of("importId", id.value()));
+        }
+    }
+
+    private UmlModel namespaceModel(UmlModel current, List<UmlPackage> packages, List<UmlModelImport> imports) {
+        try {
+            return new UmlModel(current.id(), current.name(), current.classes(), current.associations(),
+                    current.invariants(), current.enumerations(), packages, imports, current.dataTypes());
+        } catch (de.useweb.backend.domain.uml.UmlNamespaceException exception) {
+            throw error(exception.code(), exception.getMessage(),
+                    "Der Namespace oder Import im UML-Modell ist ungueltig.", exception.details());
+        } catch (IllegalArgumentException exception) {
+            throw error("QUALIFIED_NAME_CONFLICT", exception.getMessage(),
+                    "Der qualifizierte Name steht bereits in Konflikt mit einem Modellelement.", Map.of());
+        }
+    }
+
     public UmlAssociationDto createAssociation(ProjectId projectId, UmlAssociationDto input) {
         Project project = projectService.loadProject(projectId);
         UmlModel model = project.umlModel();
@@ -429,8 +637,9 @@ public class UmlModelService {
         }
         List<UmlAssociationEndDto> inputEnds = safeList(input.ends());
         if (inputEnds.size() < 2) {
-            throw error(TYPE_ERROR, "Associations must have at least two ends", "Eine Assoziation muss mindestens zwei Enden haben.",
-                    Map.of("associationName", name, "endCount", inputEnds.size()));
+            throw error("NARY_END_REQUIRED", "Associations must have at least two ends",
+                    "Eine Assoziation muss mindestens zwei Enden haben.",
+                    Map.of("associationName", name, "field", "ends", "endCount", inputEnds.size()));
         }
         UmlAssociation association = new UmlAssociation(
                 new UmlAssociationId(idOrGenerated(input.id(), "assoc")),
@@ -456,9 +665,9 @@ public class UmlModelService {
         }
         List<UmlAssociationEndDto> inputEnds = safeList(input.ends());
         if (inputEnds.size() < 2) {
-            throw error(TYPE_ERROR, "Associations must have at least two ends",
+            throw error("NARY_END_REQUIRED", "Associations must have at least two ends",
                     "Eine Assoziation muss mindestens zwei Enden haben.",
-                    Map.of("associationId", associationId.value(), "endCount", inputEnds.size()));
+                    Map.of("associationId", associationId.value(), "field", "ends", "endCount", inputEnds.size()));
         }
         Set<UmlAssociationEndId> currentEndIds = current.ends().stream().map(UmlAssociationEnd::id)
                 .collect(java.util.stream.Collectors.toSet());
@@ -483,6 +692,48 @@ public class UmlModelService {
         save(project, new UmlModel(model.id(), model.name(), model.classes(), associations,
                 model.invariants(), model.enumerations(), model.packages(), model.imports(), model.dataTypes()));
         return ProjectDtoMapper.toDto(updated);
+    }
+
+    public AssociationClassAggregateDto createAssociationClass(ProjectId projectId,
+            UmlAssociationId associationId, UmlClassDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlAssociation association = requireAssociation(model, associationId);
+        if (association.associationClassId() != null) {
+            throw error("ASSOCIATION_CLASS_ALREADY_BOUND",
+                    "Association already has an association class: " + associationId.value(),
+                    "Die Assoziation besitzt bereits eine Association Class.",
+                    Map.of("associationId", associationId.value(),
+                            "associationClassId", association.associationClassId().value()));
+        }
+
+        String name = requireName(input.name(), "className");
+        requireUniqueClassName(model, name, packageId(input.packageId()), null);
+        UmlClass associationClass = new UmlClass(
+                new UmlClassId(idOrGenerated(input.id(), "class")),
+                name,
+                safeList(input.attributes()).stream()
+                        .map(attribute -> attributeWithGeneratedId(attribute, model)).toList(),
+                safeList(input.operations()).stream()
+                        .peek(this::validateOperationDraft)
+                        .map(operation -> operationWithGeneratedId(operation, model)).toList(),
+                input.abstractClass(),
+                safeList(input.superClassIds()).stream().map(UmlClassId::new).toList(),
+                visibility(input.visibility()), packageId(input.packageId()));
+        UmlAssociation boundAssociation = new UmlAssociation(
+                association.id(), association.name(), association.ends(), associationClass.id());
+        List<UmlAssociation> associations = model.associations().stream()
+                .map(candidate -> candidate.id().equals(associationId) ? boundAssociation : candidate).toList();
+        UmlModel updated = new UmlModel(model.id(), model.name(), append(model.classes(), associationClass),
+                associations, model.invariants(), model.enumerations(), model.packages(), model.imports(),
+                model.dataTypes());
+        save(project, updated);
+        UmlModelDto dto = ProjectDtoMapper.toDto(updated);
+        UmlClassDto classDto = dto.classes().stream()
+                .filter(candidate -> candidate.id().equals(associationClass.id().value())).findFirst().orElseThrow();
+        UmlAssociationDto associationDto = dto.associations().stream()
+                .filter(candidate -> candidate.id().equals(associationId.value())).findFirst().orElseThrow();
+        return new AssociationClassAggregateDto(associationDto, classDto);
     }
 
     public UmlInvariantDto createInvariant(ProjectId projectId, UmlInvariantDto input) {
@@ -515,13 +766,288 @@ public class UmlModelService {
         return ProjectDtoMapper.toDto(invariant);
     }
 
+    public UmlInvariantDto updateInvariant(ProjectId projectId, UmlInvariantId invariantId, UmlInvariantDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        requireInvariant(model, invariantId);
+        String name = requireName(input.name(), "invariantName");
+        requireClass(model, new UmlClassId(input.contextClassId()));
+        if (model.invariants().stream().anyMatch(invariant -> !invariant.id().equals(invariantId)
+                && invariant.name().equals(name))) {
+            throw error(TYPE_ERROR, "Duplicate invariant name: " + name,
+                    "Der Invariantenname ist bereits vorhanden.", Map.of("invariantName", name));
+        }
+        OclExpressionDto expression = input.expression();
+        if (expression == null || expression.text() == null || expression.text().isBlank()) {
+            throw error(TYPE_ERROR, "Invariant expression must not be blank",
+                    "Der OCL-Ausdruck der Invariante darf nicht leer sein.", Map.of("invariantId", invariantId.value()));
+        }
+        UmlInvariant replacement = ProjectDtoMapper.toDomain(new UmlInvariantDto(
+                invariantId.value(), name, input.contextClassId(),
+                new OclExpressionDto(idOrGenerated(expression.id(), "expr"), expression.text(),
+                        expression.language() == null ? "OCL" : expression.language(),
+                        expression.languageVersion() == null ? "MVP" : expression.languageVersion()),
+                input.enabled()));
+        List<UmlInvariant> invariants = model.invariants().stream()
+                .map(invariant -> invariant.id().equals(invariantId) ? replacement : invariant).toList();
+        save(project, new UmlModel(model.id(), model.name(), model.classes(), model.associations(), invariants,
+                model.enumerations(), model.packages(), model.imports(), model.dataTypes()));
+        return ProjectDtoMapper.toDto(replacement);
+    }
+
+    public UmlDataTypeDto createDataType(ProjectId projectId, UmlDataTypeDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlDataTypeDto normalized = new UmlDataTypeDto(idOrGenerated(input.id(), "datatype"),
+                requireName(input.name(), "dataTypeName"), safeList(input.properties()), input.packageId(), input.qualifiedName(),
+                safeList(input.operations()));
+        UmlDataType dataType = dataType(normalized, model);
+        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(), model.invariants(),
+                model.enumerations(), model.packages(), model.imports(), append(model.dataTypes(), dataType));
+        save(project, updated);
+        return ProjectDtoMapper.toDto(dataType, updated);
+    }
+
+    public UmlEnumerationDto createEnumeration(ProjectId projectId, UmlEnumerationDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        String id = idOrGenerated(input.id(), "enumeration");
+        UmlEnumeration enumeration = enumeration(input, new UmlEnumerationId(id), model);
+        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(), model.invariants(),
+                append(model.enumerations(), enumeration), model.packages(), model.imports(), model.dataTypes());
+        save(project, updated);
+        return ProjectDtoMapper.toDto(enumeration);
+    }
+
+    public UmlEnumerationDto updateEnumeration(ProjectId projectId, UmlEnumerationId enumerationId,
+            UmlEnumerationDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        if (model.enumerations().stream().noneMatch(value -> value.id().equals(enumerationId))) {
+            throw error("UNKNOWN_ENUMERATION", "Unknown Enumeration: " + enumerationId.value(),
+                    "Die Enumeration existiert nicht.", Map.of("enumerationId", enumerationId.value()));
+        }
+        UmlEnumeration replacement = enumeration(input, enumerationId, model);
+        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(), model.invariants(),
+                model.enumerations().stream().map(value -> value.id().equals(enumerationId) ? replacement : value).toList(),
+                model.packages(), model.imports(), model.dataTypes());
+        save(project, updated);
+        return ProjectDtoMapper.toDto(replacement);
+    }
+
+    public UmlEnumerationDto deleteEnumerationLiteral(ProjectId projectId, UmlEnumerationId enumerationId,
+            UmlEnumerationLiteralId literalId) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlEnumeration current = model.enumerations().stream().filter(value -> value.id().equals(enumerationId))
+                .findFirst().orElseThrow(() -> error("UNKNOWN_ENUMERATION", "Unknown Enumeration: " + enumerationId.value(),
+                        "Die Enumeration existiert nicht.", Map.of("enumerationId", enumerationId.value())));
+        List<UmlEnumerationLiteral> literals = current.literalDefinitions().stream()
+                .filter(value -> !value.id().equals(literalId)).toList();
+        if (literals.size() == current.literalDefinitions().size()) {
+            throw error("UNKNOWN_ENUMERATION_LITERAL", "Unknown Enumeration literal: " + literalId.value(),
+                    "Das Enumeration-Literal existiert nicht.", Map.of("literalId", literalId.value()));
+        }
+        UmlEnumeration replacement = new UmlEnumeration(current.id(), current.name(), literals, current.packageId(),
+                current.visibility());
+        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(), model.invariants(),
+                model.enumerations().stream().map(value -> value.id().equals(enumerationId) ? replacement : value).toList(),
+                model.packages(), model.imports(), model.dataTypes());
+        save(project, updated);
+        return ProjectDtoMapper.toDto(replacement);
+    }
+
+    public UmlEnumerationDto deleteEnumeration(ProjectId projectId, UmlEnumerationId enumerationId) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlEnumeration current = model.enumerations().stream().filter(value -> value.id().equals(enumerationId))
+                .findFirst().orElseThrow(() -> error("UNKNOWN_ENUMERATION", "Unknown Enumeration: " + enumerationId.value(),
+                        "Die Enumeration existiert nicht.", Map.of("enumerationId", enumerationId.value())));
+        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(), model.invariants(),
+                model.enumerations().stream().filter(value -> !value.id().equals(enumerationId)).toList(),
+                model.packages(), model.imports(), model.dataTypes());
+        save(project, updated);
+        return ProjectDtoMapper.toDto(current);
+    }
+
+    private UmlEnumeration enumeration(UmlEnumerationDto input, UmlEnumerationId id, UmlModel model) {
+        List<UmlEnumerationLiteral> literals;
+        if (input.literalDefinitions() != null && !input.literalDefinitions().isEmpty()) {
+            literals = input.literalDefinitions().stream().map(value -> new UmlEnumerationLiteral(
+                    new UmlEnumerationLiteralId(idOrGenerated(value.id(), "enum-literal")),
+                    requireName(value.name(), "literalName"))).toList();
+        } else {
+            literals = safeList(input.literals()).stream().map(name -> new UmlEnumerationLiteral(
+                    new UmlEnumerationLiteralId(idOrGenerated(null, "enum-literal")),
+                    requireName(name, "literalName"))).toList();
+        }
+        try {
+            return new UmlEnumeration(id, requireName(input.name(), "enumerationName"), literals,
+                    packageId(input.packageId()), visibility(input.visibility()));
+        } catch (IllegalArgumentException exception) {
+            throw error("INVALID_ENUMERATION", exception.getMessage(), "Die Enumeration ist ungueltig.",
+                    Map.of("enumerationId", id.value()));
+        }
+    }
+
+    public UmlDataTypeDto updateDataType(ProjectId projectId, UmlDataTypeId dataTypeId, UmlDataTypeDto input) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        if (model.dataTypes().stream().noneMatch(dataType -> dataType.id().equals(dataTypeId))) {
+            throw error("UNKNOWN_DATATYPE", "Unknown DataType: " + dataTypeId.value(),
+                    "Der DataType existiert nicht.", Map.of("dataTypeId", dataTypeId.value()));
+        }
+        UmlDataType replacement = dataType(new UmlDataTypeDto(dataTypeId.value(),
+                requireName(input.name(), "dataTypeName"), safeList(input.properties()), input.packageId(), input.qualifiedName(),
+                safeList(input.operations())), model);
+        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(), model.invariants(),
+                model.enumerations(), model.packages(), model.imports(), model.dataTypes().stream()
+                        .map(dataType -> dataType.id().equals(dataTypeId) ? replacement : dataType).toList());
+        save(project, updated);
+        return ProjectDtoMapper.toDto(replacement, updated);
+    }
+
+    public UmlDataTypeDto deleteDataType(ProjectId projectId, UmlDataTypeId dataTypeId) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlDataType current = model.dataTypes().stream().filter(value -> value.id().equals(dataTypeId)).findFirst()
+                .orElseThrow(() -> error("UNKNOWN_DATATYPE", "Unknown DataType: " + dataTypeId.value(),
+                        "Der DataType existiert nicht.", Map.of("dataTypeId", dataTypeId.value())));
+        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(), model.invariants(),
+                model.enumerations(), model.packages(), model.imports(),
+                model.dataTypes().stream().filter(value -> !value.id().equals(dataTypeId)).toList());
+        save(project, updated);
+        return ProjectDtoMapper.toDto(current, model);
+    }
+
+    public UmlDataTypeDto deleteDataTypeProperty(ProjectId projectId, UmlDataTypeId dataTypeId, String propertyId) {
+        Project project = projectService.loadProject(projectId);
+        UmlModel model = project.umlModel();
+        UmlDataType current = model.dataTypes().stream().filter(value -> value.id().equals(dataTypeId)).findFirst()
+                .orElseThrow(() -> error("UNKNOWN_DATATYPE", "Unknown DataType: " + dataTypeId.value(),
+                        "Der DataType existiert nicht.", Map.of("dataTypeId", dataTypeId.value())));
+        if (current.properties().stream().noneMatch(property -> property.id().equals(propertyId))) {
+            throw error("UNKNOWN_DATATYPE_PROPERTY", "Unknown DataType property: " + propertyId,
+                    "Die DataType-Property existiert nicht.",
+                    Map.of("dataTypeId", dataTypeId.value(), "propertyId", propertyId));
+        }
+        UmlDataType replacement = new UmlDataType(current.id(), current.name(), current.properties().stream()
+                .filter(property -> !property.id().equals(propertyId)).toList(), current.packageId(), current.operations());
+        UmlModel updated = new UmlModel(model.id(), model.name(), model.classes(), model.associations(), model.invariants(),
+                model.enumerations(), model.packages(), model.imports(), model.dataTypes().stream()
+                        .map(dataType -> dataType.id().equals(dataTypeId) ? replacement : dataType).toList());
+        save(project, updated);
+        return ProjectDtoMapper.toDto(replacement, updated);
+    }
+
+    private UmlDataType dataType(UmlDataTypeDto input, UmlModel model) {
+        UmlPackageId packageId = packageId(input.packageId());
+        UmlClass typeContext = new UmlClass(new UmlClassId("datatype-context-" + input.id()), input.name(),
+                List.of(), List.of(), false, List.of(), UmlVisibility.PUBLIC, packageId);
+        return new UmlDataType(new UmlDataTypeId(input.id()), input.name(), safeList(input.properties()).stream()
+                .map(property -> new UmlDataTypeProperty(
+                        idOrGenerated(property.id(), "datatype-property"),
+                        requireName(property.name(), "dataTypePropertyName"),
+                        requireKnownType(model, property.type(), typeContext, false)))
+                .toList(), packageId, safeList(input.operations()).stream().map(ProjectDtoMapper::toDomain).toList());
+    }
+
     private UmlAttribute attributeWithGeneratedId(UmlAttributeDto input, UmlModel model) {
+        return attributeWithGeneratedId(input, model, null);
+    }
+
+    private UmlAttribute attributeWithGeneratedId(UmlAttributeDto input, UmlModel model, UmlClass contextClass) {
+        validateStaticAttribute(input);
         return new UmlAttribute(
                 new UmlAttributeId(idOrGenerated(input.id(), "attr")),
                 requireName(input.name(), "attributeName"),
-                requireKnownType(model, input.type(), false),
+                requireKnownType(model, input.type(), contextClass, false),
                 Boolean.TRUE.equals(input.derived()), input.deriveExpression(), input.initExpression(),
-                visibility(input.visibility()));
+                visibility(input.visibility()), safeList(input.redefinedAttributeIds()).stream()
+                        .map(UmlAttributeId::new).toList(), Boolean.TRUE.equals(input.staticAttribute()),
+                classifierValue(input, model, contextClass));
+    }
+
+    private UmlClassifierValue classifierValue(UmlAttributeDto input, UmlModel model) {
+        return classifierValue(input, model, null);
+    }
+
+    private UmlClassifierValue classifierValue(UmlAttributeDto input, UmlModel model, UmlClass contextClass) {
+        if (input.classifierValue() == null) return null;
+        var resolvedValueType = resolveKnownType(model, input.classifierValue().type(), contextClass, false);
+        var resolvedAttributeType = resolveKnownType(model, input.type(), contextClass, false);
+        UmlType type = resolvedValueType.umlType();
+        if (!type.name().equals(resolvedAttributeType.umlType().name())) {
+            throw error("STATIC_VALUE_TYPE_MISMATCH", "Classifier value type does not match attribute type",
+                    "Der Classifier-Wert passt nicht zum Attributtyp.",
+                    Map.of("attributeId", input.id() == null ? "" : input.id(), "expectedType", input.type(),
+                            "actualType", input.classifierValue().type()));
+        }
+        Object normalized = validateClassifierValue(input.classifierValue().value(), resolvedValueType, input.id());
+        return new UmlClassifierValue(type, normalized);
+    }
+
+    private void validateStaticAttribute(UmlAttributeDto input) {
+        if (Boolean.TRUE.equals(input.staticAttribute())
+                && (containsSelf(input.deriveExpression()) || containsSelf(input.initExpression()))) {
+            throw error("STATIC_CONTEXT_SELF_REFERENCE",
+                    "Static attribute expression must not reference self",
+                    "Ein statischer Ausdruck darf nicht auf self zugreifen.",
+                    Map.of("attributeId", input.id() == null ? "" : input.id(),
+                            "field", containsSelf(input.deriveExpression()) ? "deriveExpression" : "initExpression"));
+        }
+        if (!Boolean.TRUE.equals(input.staticAttribute()) && input.classifierValue() != null) {
+            throw error("CLASSIFIER_VALUE_REQUIRES_STATIC_ATTRIBUTE",
+                    "Classifier value requires a static attribute",
+                    "Ein Classifier-Wert setzt ein statisches Attribut voraus.",
+                    Map.of("attributeId", input.id() == null ? "" : input.id(), "field", "classifierValue"));
+        }
+        if (Boolean.TRUE.equals(input.derived()) && input.classifierValue() != null) {
+            throw error("DERIVED_STATIC_VALUE_READ_ONLY",
+                    "Derived static attributes must not store a classifier value",
+                    "Abgeleitete statische Werte sind schreibgeschützt.",
+                    Map.of("attributeId", input.id() == null ? "" : input.id(), "field", "classifierValue"));
+        }
+    }
+
+    private void validateOperationDraft(UmlOperationDto input) {
+        if (Boolean.TRUE.equals(input.abstractOperation()) && input.bodyExpression() != null
+                && !input.bodyExpression().isBlank()) {
+            throw error("ABSTRACT_OPERATION_BODY_NOT_ALLOWED",
+                    "Abstract operations must not define a body expression",
+                    "Abstrakte Operationen duerfen keinen Body-Ausdruck besitzen.",
+                    Map.of("operationId", input.id() == null ? "" : input.id(), "field", "bodyExpression"));
+        }
+        if (!Boolean.TRUE.equals(input.staticOperation())) return;
+        if (containsSelf(input.bodyExpression())) {
+            throw error("STATIC_CONTEXT_SELF_REFERENCE", "Static operation body must not reference self",
+                    "Eine statische Operation darf nicht auf self zugreifen.",
+                    Map.of("operationId", input.id() == null ? "" : input.id(), "field", "bodyExpression"));
+        }
+        safeList(input.contracts()).stream().filter(contract -> containsSelf(contract.expression())).findFirst()
+                .ifPresent(contract -> {
+                    throw error("STATIC_CONTEXT_SELF_REFERENCE", "Static operation contract must not reference self",
+                            "Ein Vertrag einer statischen Operation darf nicht auf self zugreifen.",
+                            Map.of("operationId", input.id() == null ? "" : input.id(),
+                                    "contractId", contract.id() == null ? "" : contract.id(), "field", "contracts"));
+                });
+    }
+
+    private boolean containsSelf(String expression) {
+        return expression != null && new OclLexer().tokenize(expression).tokens().stream()
+                .anyMatch(token -> token.type() == OclTokenType.SELF);
+    }
+
+    private Object validateClassifierValue(Object value, StructuredUmlTypeService.ResolvedType type, String attributeId) {
+        try {
+            return structuredTypes.normalizeValue(value, type, "classifierValue.value");
+        } catch (StructuredUmlTypeService.TypeException exception) {
+            throw error("STATIC_VALUE_TYPE_MISMATCH", exception.getMessage(),
+                    "Der Classifier-Wert passt nicht zum Attributtyp.",
+                    Map.of("attributeId", attributeId == null ? "" : attributeId,
+                            "expectedType", type.umlType().name(), "fieldPath", exception.path(),
+                            "reason", exception.reason(), "actualValue", String.valueOf(exception.actualValue())));
+        }
     }
 
     private UmlOperation operationWithGeneratedId(UmlOperationDto input, UmlModel model) {
@@ -532,7 +1058,8 @@ public class UmlModelService {
                 safeList(input.parameters()).stream().map(parameter -> parameterWithGeneratedId(parameter, model)).toList(),
                 input.bodyExpression(), visibility(input.visibility()),
                 Boolean.TRUE.equals(input.abstractOperation()), Boolean.TRUE.equals(input.query()),
-                contracts(input));
+                Boolean.TRUE.equals(input.staticOperation()),
+                contracts(input), safeList(input.redefinedOperationIds()).stream().map(UmlOperationId::new).toList());
     }
 
     private List<UmlOperationContract> contracts(UmlOperationDto input) {
@@ -579,7 +1106,7 @@ public class UmlModelService {
                 Boolean.TRUE.equals(input.derived()), Boolean.TRUE.equals(input.union()),
                 safeList(input.subsettedEndIds()).stream().map(UmlAssociationEndId::new).toList(),
                 safeList(input.redefinedEndIds()).stream().map(UmlAssociationEndId::new).toList(),
-                qualifierDefinitions(input, model), aggregationKind(input.aggregationKind()));
+                qualifierDefinitions(input, model), aggregationKind(input.aggregationKind()), input.deriveExpression());
     }
 
     private UmlAssociationEnd associationEndForUpdate(UmlAssociationEndDto input, UmlModel model,
@@ -602,7 +1129,7 @@ public class UmlModelService {
                 Boolean.TRUE.equals(input.union()),
                 safeList(input.subsettedEndIds()).stream().map(UmlAssociationEndId::new).toList(),
                 safeList(input.redefinedEndIds()).stream().map(UmlAssociationEndId::new).toList(),
-                qualifierDefinitions(input, model), aggregationKind(input.aggregationKind()));
+                qualifierDefinitions(input, model), aggregationKind(input.aggregationKind()), input.deriveExpression());
     }
 
     private UmlClassId associationClassId(String input, UmlModel model, UmlAssociationId currentAssociationId) {
@@ -680,32 +1207,22 @@ public class UmlModelService {
     }
 
     private UmlType requireKnownType(UmlModel model, String typeName, boolean allowVoid) {
-        String normalizedType = requireName(typeName, "type");
-        if (allowVoid && Objects.equals("Void", normalizedType)) {
-            return UmlType.VOID;
+        return requireKnownType(model, typeName, null, allowVoid);
+    }
+
+    private UmlType requireKnownType(UmlModel model, String typeName, UmlClass contextClass, boolean allowVoid) {
+        return resolveKnownType(model, typeName, contextClass, allowVoid).umlType();
+    }
+
+    private StructuredUmlTypeService.ResolvedType resolveKnownType(UmlModel model, String typeName,
+            UmlClass contextClass, boolean allowVoid) {
+        try {
+            return structuredTypes.resolve(model, requireName(typeName, "type"), contextClass, allowVoid);
+        } catch (StructuredUmlTypeService.TypeException exception) {
+            throw error(TYPE_ERROR, exception.getMessage(), "Der angegebene Typ ist im Modell nicht bekannt.",
+                    Map.of("type", typeName == null ? "" : typeName, "fieldPath", exception.path(),
+                            "reason", exception.reason()));
         }
-        for (PrimitiveType primitiveType : PrimitiveType.values()) {
-            if (primitiveType.displayName().equals(normalizedType)) {
-                return switch (primitiveType) {
-                    case STRING -> UmlType.STRING;
-                    case INTEGER -> UmlType.INTEGER;
-                    case REAL -> UmlType.REAL;
-                    case BOOLEAN -> UmlType.BOOLEAN;
-                };
-            }
-        }
-        boolean classTypeExists = model.classes().stream().anyMatch(umlClass -> umlClass.name().equals(normalizedType));
-        if (classTypeExists) {
-            return UmlType.classType(normalizedType);
-        }
-        if (normalizedType.equals("UnlimitedNatural")) {
-            return UmlType.UNLIMITED_NATURAL;
-        }
-        if (model.findEnumerationByName(normalizedType).isPresent()) {
-            return UmlType.enumerationType(normalizedType);
-        }
-        throw error(TYPE_ERROR, "Unknown type: " + normalizedType, "Der angegebene Typ ist im Modell nicht bekannt.",
-                Map.of("type", normalizedType));
     }
 
     private void requireUniqueClassName(UmlModel model, String name, UmlPackageId packageId, UmlClassId ignoredClassId) {
@@ -756,6 +1273,10 @@ public class UmlModelService {
             case "DUPLICATE_SUPERCLASS" -> "Eine direkte Oberklasse darf nur einmal ausgewaehlt werden.";
             case "GENERALIZATION_CYCLE" -> "Die Vererbung wuerde einen Zyklus erzeugen.";
             case "AMBIGUOUS_INHERITED_FEATURE" -> "Mehrere Oberklassen liefern dasselbe Feature mehrdeutig.";
+            case "UNKNOWN_REDEFINED_FEATURE" -> "Das ausgewaehlte Redefinitionsziel existiert nicht.";
+            case "INVALID_REDEFINITION_OWNER" -> "Redefinitionsziele muessen von einer Oberklasse geerbt werden.";
+            case "INCOMPATIBLE_REDEFINED_FEATURE" -> "Das lokale Feature ist mit dem Redefinitionsziel nicht kompatibel.";
+            case "DUPLICATE_FEATURE_ID" -> "Feature-IDs muessen modellweit eindeutig sein.";
             default -> "Die Vererbung ist ungueltig.";
         };
         return error(exception.code(), exception.getMessage(), userMessage, exception.details());
@@ -772,7 +1293,8 @@ public class UmlModelService {
                 project.modelText(),
                 updatedModel,
                 project.objectModel(),
-                project.layout()));
+                project.layout(),
+                project.definitions()));
     }
 
     private Project save(Project project, UmlModel updatedModel, ObjectModel updatedObjectModel, LayoutInformation updatedLayout) {
@@ -782,7 +1304,8 @@ public class UmlModelService {
                 project.modelText(),
                 updatedModel,
                 updatedObjectModel,
-                updatedLayout));
+                updatedLayout,
+                project.definitions()));
     }
 
     @SafeVarargs

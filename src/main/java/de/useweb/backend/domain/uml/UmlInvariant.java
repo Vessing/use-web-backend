@@ -1,5 +1,7 @@
 package de.useweb.backend.domain.uml;
 
+import java.util.List;
+
 import de.useweb.backend.domain.ocl.OclExpression;
 
 public record UmlInvariant(
@@ -7,7 +9,14 @@ public record UmlInvariant(
         String name,
         UmlClassId contextClassId,
         OclExpression expression,
-        boolean enabled) {
+        boolean enabled,
+        List<String> contextVariableNames,
+        boolean existential) {
+
+    public UmlInvariant(UmlInvariantId id, String name, UmlClassId contextClassId,
+            OclExpression expression, boolean enabled) {
+        this(id, name, contextClassId, expression, enabled, List.of(), false);
+    }
 
     public UmlInvariant {
         if (id == null) {
@@ -21,6 +30,11 @@ public record UmlInvariant(
         }
         if (expression == null) {
             throw new IllegalArgumentException("UmlInvariant expression must not be null");
+        }
+        contextVariableNames = List.copyOf(contextVariableNames == null ? List.of() : contextVariableNames);
+        if (contextVariableNames.stream().anyMatch(value -> value == null || value.isBlank())
+                || contextVariableNames.stream().distinct().count() != contextVariableNames.size()) {
+            throw new IllegalArgumentException("Invariant context variable names must be non-blank and unique");
         }
     }
 }

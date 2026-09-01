@@ -23,6 +23,27 @@ public record Multiplicity(int lower, Integer upper, boolean unbounded, String r
     }
 
     public boolean contains(int count) {
-        return count >= lower && (unbounded || count <= upper);
+        if (count < 0) {
+            return false;
+        }
+        String normalized = raw == null ? "" : raw.replaceAll("\\s+", "");
+        if (!normalized.contains(",")) {
+            return count >= lower && (unbounded || count <= upper);
+        }
+        for (String range : normalized.split(",")) {
+            if ("*".equals(range)) {
+                return true;
+            }
+            if (range.contains("..")) {
+                String[] bounds = range.split("\\.\\.", 2);
+                int rangeLower = Integer.parseInt(bounds[0]);
+                if (count >= rangeLower && ("*".equals(bounds[1]) || count <= Integer.parseInt(bounds[1]))) {
+                    return true;
+                }
+            } else if (count == Integer.parseInt(range)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

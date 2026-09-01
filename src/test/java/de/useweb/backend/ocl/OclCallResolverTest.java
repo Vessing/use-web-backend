@@ -10,6 +10,7 @@ import de.useweb.backend.domain.uml.UmlAttribute;
 import de.useweb.backend.domain.uml.UmlAttributeId;
 import de.useweb.backend.domain.uml.UmlClass;
 import de.useweb.backend.domain.uml.UmlClassId;
+import de.useweb.backend.domain.uml.UmlClassifierValue;
 import de.useweb.backend.domain.uml.UmlModel;
 import de.useweb.backend.domain.uml.UmlModelId;
 import de.useweb.backend.domain.uml.UmlOperation;
@@ -70,6 +71,41 @@ class OclCallResolverTest {
         assertThat(inaccessible.status()).isEqualTo(OclCallResolutionResult.Status.INACCESSIBLE);
     }
 
+    @Test
+    void dispatchesExplicitlyRedefinedFeaturesToTheLocalFeature() {
+        UmlClass left = redefinableClass("left", "Left", "left-name", "left-display", List.of());
+        UmlClass right = redefinableClass("right", "Right", "right-name", "right-display", List.of());
+        UmlAttribute localName = new UmlAttribute(new UmlAttributeId("child-name"), "name", UmlType.STRING,
+                false, null, null, UmlVisibility.PUBLIC,
+                List.of(new UmlAttributeId("left-name"), new UmlAttributeId("right-name")));
+        UmlOperation localDisplay = new UmlOperation(new UmlOperationId("child-display"), "displayName",
+                UmlType.STRING, List.of(), null, UmlVisibility.PUBLIC, false, true, List.of(),
+                List.of(new UmlOperationId("left-display"), new UmlOperationId("right-display")));
+        UmlClass child = new UmlClass(new UmlClassId("child"), "Child", List.of(localName),
+                List.of(localDisplay), false, List.of(left.id(), right.id()));
+        UmlModel model = new UmlModel(new UmlModelId("model-redefinition"), "Redefinition",
+                List.of(left, right, child), List.of(), List.of());
+        OclCallResolver resolver = resolver(model, child.id());
+        OclType receiver = OclType.classType(child, model);
+
+        assertThat(resolver.resolveProperty(receiver, "name").resolution().featureId()).isEqualTo("child-name");
+        assertThat(resolver.resolveOperation(receiver, "displayName", List.of()).resolution().featureId())
+                .isEqualTo("child-display");
+    }
+
+    @Test
+    void classifierValuesResolveOnlyStaticAttributes() {
+        UmlModel model = model();
+        OclCallResolver resolver = resolver(model, ITEM);
+        OclType itemType = OclType.classType(model.findClass(ITEM).orElseThrow(), model);
+        OclType classifier = OclType.classifierValueType(itemType);
+
+        assertThat(resolver.resolveProperty(classifier, "nextNumber").status())
+                .isEqualTo(OclCallResolutionResult.Status.RESOLVED);
+        assertThat(resolver.resolveProperty(classifier, "name").status())
+                .isEqualTo(OclCallResolutionResult.Status.UNKNOWN);
+    }
+
     private static OclCallResolver resolver(UmlModel model, UmlClassId context) {
         return new OclCallResolver(new TypeEnvironment(model, model.findClass(context).orElseThrow()));
     }
@@ -88,7 +124,10 @@ class OclCallResolverTest {
         UmlOperation secret = operation("operation-secret", "secret", UmlType.INTEGER, List.of(),
                 UmlVisibility.PRIVATE);
         UmlClass item = new UmlClass(ITEM, "Item",
-                List.of(new UmlAttribute(new UmlAttributeId("attribute-name"), "name", UmlType.STRING)),
+                List.of(new UmlAttribute(new UmlAttributeId("attribute-name"), "name", UmlType.STRING),
+                        new UmlAttribute(new UmlAttributeId("attribute-next"), "nextNumber", UmlType.INTEGER,
+                                false, null, null, UmlVisibility.PUBLIC, List.of(), true,
+                                new UmlClassifierValue(UmlType.INTEGER, 42))),
                 List.of(pickInteger, pickReal, mixLeft, mixRight, secret));
         UmlClass other = new UmlClass(OTHER, "Other", List.of(), List.of());
         return new UmlModel(new UmlModelId("model-resolution"), "Resolution", List.of(item, other),
@@ -98,6 +137,15 @@ class OclCallResolverTest {
     private static UmlOperation operation(String id, String name, UmlType result,
             List<UmlParameter> parameters, UmlVisibility visibility) {
         return new UmlOperation(new UmlOperationId(id), name, result, parameters, null, visibility, false, true);
+    }
+
+    private static UmlClass redefinableClass(String id, String name, String attributeId, String operationId,
+            List<UmlClassId> parents) {
+        return new UmlClass(new UmlClassId(id), name,
+                List.of(new UmlAttribute(new UmlAttributeId(attributeId), "name", UmlType.STRING)),
+                List.of(new UmlOperation(new UmlOperationId(operationId), "displayName", UmlType.STRING,
+                        List.of())),
+                false, parents);
     }
 
     private static UmlParameter parameter(String id, UmlType type) {

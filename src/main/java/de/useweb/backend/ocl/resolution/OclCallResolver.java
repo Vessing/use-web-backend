@@ -25,13 +25,18 @@ public final class OclCallResolver {
         if (standard.isPresent()) {
             return resolved(OclCallKind.STANDARD_LIBRARY, standard.get(), "ocl-library:" + name, name);
         }
-        if (receiver.kind() != OclType.Kind.CLASS) return unknown("Receiver is not class-valued");
-        Optional<UmlClass> receiverClass = environment.findClass(receiver.classId());
+        boolean classifierReceiver = receiver.kind() == OclType.Kind.OCL_TYPE;
+        OclType representedType = classifierReceiver ? receiver.classifierType() : receiver;
+        if (representedType.kind() != OclType.Kind.CLASS) return unknown("Receiver is not class-valued");
+        Optional<UmlClass> receiverClass = environment.findClass(representedType.classId());
         if (receiverClass.isEmpty()) return unknown("Unknown receiver classifier");
 
         Optional<UmlModel.ResolvedAttribute> attribute = environment.umlModel()
                 .resolveAttribute(receiverClass.get().id(), name);
         if (attribute.isPresent()) {
+            if (classifierReceiver && !attribute.get().attribute().staticAttribute()) {
+                return unknown("Instance attribute '" + name + "' cannot be read from a classifier value");
+            }
             if (!de.useweb.backend.ocl.profile.OclOptionalCompliancePolicy.mayAccess(environment.umlModel(),
                     attribute.get().attribute().visibility(), attribute.get().owner(), environment.contextClass())) {
                 return unresolved(OclCallResolutionResult.Status.INACCESSIBLE,
@@ -44,7 +49,7 @@ public final class OclCallResolver {
 
         if (environment.definitionTypeResolver() != null) {
             List<OclDefinitionSignature> definitions = environment.definitionTypeResolver()
-                    .propertySignatures(receiver.classId(), name);
+                    .propertySignatures(representedType.classId(), name);
             if (definitions.size() == 1) {
                 OclDefinitionSignature definition = definitions.getFirst();
                 return resolved(OclCallKind.DEFINITION_PROPERTY, definition.resultType(),
@@ -54,7 +59,7 @@ public final class OclCallResolver {
                 return unresolved(OclCallResolutionResult.Status.AMBIGUOUS,
                         "Property definition '" + name + "' is ambiguous");
             }
-            Optional<OclType> legacy = environment.definitionTypeResolver().propertyType(receiver.classId(), name);
+            Optional<OclType> legacy = environment.definitionTypeResolver().propertyType(representedType.classId(), name);
             if (legacy.isPresent()) {
                 return resolved(OclCallKind.DEFINITION_PROPERTY, legacy.get(), "definition:" + name, name);
             }

@@ -15,6 +15,7 @@ import de.useweb.backend.error.InvalidProjectFormatException;
 import de.useweb.backend.error.ObjectModelException;
 import de.useweb.backend.error.ProjectNotFoundException;
 import de.useweb.backend.error.UmlModelException;
+import de.useweb.backend.error.CommandException;
 import de.useweb.backend.domain.uml.UmlGeneralizationException;
 import de.useweb.backend.domain.uml.UmlNamespaceException;
 import de.useweb.backend.domain.uml.UmlAssociationMetadataException;
@@ -22,6 +23,11 @@ import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    @ExceptionHandler(CommandException.class)
+    public ResponseEntity<ApiErrorDto> handleCommand(CommandException exception, HttpServletRequest request) {
+        return ResponseEntity.status(exception.status()).body(withPath(exception.error(), request));
+    }
 
     @ExceptionHandler(ProjectNotFoundException.class)
     public ResponseEntity<ApiErrorDto> handleProjectNotFound(ProjectNotFoundException exception, HttpServletRequest request) {

@@ -791,6 +791,9 @@ public class OclEvaluator {
             return standardOperation(receiver, expression.propertyName(), List.of(), context,
                     expression.sourceRange(), diagnostics).orElse(OclInvalidValue.INSTANCE);
         }
+        if (receiver instanceof ClassifierValue classifierValue) {
+            return classifierPropertyValue(classifierValue, expression, context, diagnostics);
+        }
         if (!(receiver instanceof ObjectValue objectValue)) {
             diagnostics.add(OclDiagnostic.evaluationError(
                     "Property access requires an object-valued receiver.",
@@ -1051,6 +1054,9 @@ public class OclEvaluator {
                         "Resolved attribute no longer exists.", expression.propertyRange()));
                 return OclInvalidValue.INSTANCE;
             }
+            if (attribute.get().staticAttribute()) {
+                return staticAttributeValue(objectValue, attribute.get(), expression, context, diagnostics);
+            }
             if (context.definitionRuntime() != null) {
                 try {
                     Optional<OclValue> derived = context.definitionRuntime()
@@ -1140,6 +1146,51 @@ public class OclEvaluator {
             return OclInvalidValue.INSTANCE;
         }
         return slotValue(slot.get().value(), expression, context, diagnostics);
+    }
+
+    private OclValue classifierPropertyValue(ClassifierValue classifierValue, PropertyAccessExpression expression,
+            EvaluationContext context, List<OclDiagnostic> diagnostics) {
+        OclCallResolutionResult resolved = callResolver(context).resolveProperty(
+                OclRuntimeType.of(classifierValue, context.umlModel()), expression.propertyName());
+        if (resolved.status() != OclCallResolutionResult.Status.RESOLVED
+                || resolved.resolution().kind() != OclCallKind.UML_ATTRIBUTE) {
+            diagnostics.add(OclDiagnostic.evaluationError("UNKNOWN_STATIC_FEATURE",
+                    "Unknown static attribute '" + expression.propertyName() + "'.", expression.propertyRange()));
+            return OclInvalidValue.INSTANCE;
+        }
+        Optional<UmlAttribute> attribute = context.umlModel().findAttribute(
+                new de.useweb.backend.domain.uml.UmlAttributeId(resolved.resolution().featureId()));
+        if (attribute.isEmpty() || !attribute.get().staticAttribute()) {
+            diagnostics.add(OclDiagnostic.evaluationError("INSTANCE_FEATURE_ON_CLASSIFIER",
+                    "The selected feature is not static.", expression.propertyRange()));
+            return OclInvalidValue.INSTANCE;
+        }
+        ObjectInstance syntheticReceiver = new ObjectInstance(
+                new de.useweb.backend.domain.snapshot.ObjectInstanceId("classifier-" + classifierValue.classifierId()),
+                classifierValue.qualifiedName(), classifierValue.representedType().classId(), List.of());
+        return staticAttributeValue(new ObjectValue(syntheticReceiver), attribute.get(), expression, context, diagnostics);
+    }
+
+    private OclValue staticAttributeValue(ObjectValue receiver, UmlAttribute attribute,
+            PropertyAccessExpression expression, EvaluationContext context, List<OclDiagnostic> diagnostics) {
+        if (attribute.derived() && context.definitionRuntime() != null) {
+            try {
+                Optional<OclValue> derived = context.definitionRuntime()
+                        .property(receiver, attribute.name(), context);
+                if (derived.isPresent()) return derived.get();
+            } catch (de.useweb.backend.ocl.definition.OclDefinitionEvaluationException exception) {
+                diagnostics.add(OclDiagnostic.evaluationError(exception.code(), exception.getMessage(),
+                        expression.sourceRange()));
+                return OclInvalidValue.INSTANCE;
+            }
+        }
+        if (attribute.classifierValue() == null) {
+            diagnostics.add(OclDiagnostic.evaluationError("STATIC_VALUE_UNSET",
+                    "Static attribute '" + attribute.name() + "' has no value.", expression.sourceRange()));
+            return OclInvalidValue.INSTANCE;
+        }
+        return slotValue(new SlotValue(attribute.classifierValue().value(), attribute.classifierValue().valueType()),
+                expression, context, diagnostics);
     }
 
     private OclValue slotValue(SlotValue slotValue, PropertyAccessExpression expression,

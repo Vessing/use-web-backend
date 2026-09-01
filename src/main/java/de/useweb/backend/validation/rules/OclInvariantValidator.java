@@ -1,6 +1,7 @@
 package de.useweb.backend.validation.rules;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -19,6 +20,8 @@ import de.useweb.backend.ocl.typecheck.OclTypeChecker;
 import de.useweb.backend.ocl.value.BooleanValue;
 import de.useweb.backend.ocl.value.OclInvalidValue;
 import de.useweb.backend.ocl.value.OclVoidValue;
+import de.useweb.backend.ocl.value.OclValue;
+import de.useweb.backend.ocl.value.ObjectValue;
 import de.useweb.backend.validation.result.ValidationErrorFactory;
 
 public class OclInvariantValidator {
@@ -50,31 +53,85 @@ public class OclInvariantValidator {
                         .toList());
                 continue;
             }
-            var typecheckResult = typeChecker.checkInvariant(project.umlModel(), invariant.contextClassId(), parseResult.ast());
+            var typecheckResult = typeChecker.checkInvariant(project.umlModel(), invariant.contextClassId(),
+                    parseResult.ast(), invariant.contextVariableNames());
             if (!typecheckResult.success()) {
                 errors.addAll(typecheckResult.diagnostics().stream()
                         .map(diagnostic -> diagnosticError(errorFactory, invariant, diagnostic, codeOf(diagnostic)))
                         .toList());
                 continue;
             }
-            for (ObjectInstance contextObject : project.objectModel().objects().stream()
+            List<ObjectInstance> contextObjects = project.objectModel().objects().stream()
                     .filter(object -> project.umlModel().isSubtypeOf(object.classId(), invariant.contextClassId()))
-                    .toList()) {
+                    .toList();
+            List<InvariantEvaluationContext> evaluationContexts = evaluationContexts(
+                    contextObjects, invariant.contextVariableNames());
+            boolean existentialSatisfied = false;
+            for (InvariantEvaluationContext context : evaluationContexts) {
+                ObjectInstance contextObject = context.self();
                 var evaluationResult = evaluator.evaluate(
                         parseResult.ast(),
-                        new EvaluationContext(project.umlModel(), project.objectModel(), contextObject));
+                        new EvaluationContext(project.umlModel(), project.objectModel(), contextObject, context.variables()));
                 if (!evaluationResult.success()) {
                     errors.addAll(evaluationResult.diagnostics().stream()
                             .map(diagnostic -> evaluationError(errorFactory, invariant, contextObject, diagnostic))
                             .toList());
                 } else if (evaluationResult.value() instanceof OclInvalidValue || evaluationResult.value() instanceof OclVoidValue) {
                     errors.add(undefinedInvariantResult(errorFactory, invariant, contextObject, evaluationResult.value().valueKind()));
-                } else if (evaluationResult.value() instanceof BooleanValue booleanValue && !booleanValue.value()) {
-                    errors.add(invariantViolation(errorFactory, invariant, contextObject));
+                } else if (evaluationResult.value() instanceof BooleanValue booleanValue) {
+                    if (invariant.existential() && booleanValue.value()) {
+                        existentialSatisfied = true;
+                        break;
+                    }
+                    if (!invariant.existential() && !booleanValue.value()) {
+                        errors.add(invariantViolation(errorFactory, invariant, contextObject));
+                    }
                 }
+            }
+            if (invariant.existential() && !existentialSatisfied) {
+                errors.add(existentialInvariantViolation(errorFactory, invariant));
             }
         }
         return errors;
+    }
+
+    private List<InvariantEvaluationContext> evaluationContexts(List<ObjectInstance> objects,
+            List<String> variableNames) {
+        if (variableNames == null || variableNames.isEmpty()) {
+            return objects.stream().map(object -> new InvariantEvaluationContext(object, Map.of())).toList();
+        }
+        List<InvariantEvaluationContext> result = new ArrayList<>();
+        buildEvaluationContexts(objects, variableNames, 0, new LinkedHashMap<>(), result);
+        return result;
+    }
+
+    private void buildEvaluationContexts(List<ObjectInstance> objects, List<String> variableNames, int index,
+            Map<String, OclValue> bindings, List<InvariantEvaluationContext> result) {
+        if (index == variableNames.size()) {
+            ObjectInstance self = ((ObjectValue) bindings.get(variableNames.getFirst())).object();
+            result.add(new InvariantEvaluationContext(self, Map.copyOf(bindings)));
+            return;
+        }
+        for (ObjectInstance object : objects) {
+            bindings.put(variableNames.get(index), new ObjectValue(object));
+            buildEvaluationContexts(objects, variableNames, index + 1, bindings, result);
+        }
+        bindings.remove(variableNames.get(index));
+    }
+
+    private ValidationError existentialInvariantViolation(ValidationErrorFactory errorFactory,
+            UmlInvariant invariant) {
+        return errorFactory.error(
+                ValidationErrorCode.INVARIANT_VIOLATION,
+                "Existential invariant '" + invariant.name() + "' has no satisfying context tuple.",
+                List.of(ElementTarget.invariant(invariant.id().value()),
+                        new ElementTarget(ElementType.CLASS, invariant.contextClassId().value(), null)),
+                Map.of("phase", "OCL_EVALUATION", "contextClassId", invariant.contextClassId().value(),
+                        "invariantId", invariant.id().value(), "invariantName", invariant.name(),
+                        "expression", invariant.expression().text(), "existential", true));
+    }
+
+    private record InvariantEvaluationContext(ObjectInstance self, Map<String, OclValue> variables) {
     }
 
     private ValidationError undefinedInvariantResult(

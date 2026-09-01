@@ -51,7 +51,7 @@ import de.useweb.backend.ocl.value.StringValue;
 import de.useweb.backend.ocl.value.EnumValue;
 import de.useweb.backend.ocl.value.DataTypeValue;
 import de.useweb.backend.ocl.definition.OclDefinitionService;
-import de.useweb.backend.ocl.definition.OclModelDefinitionFactory;
+import de.useweb.backend.ocl.definition.OclProjectDefinitionFactory;
 
 @Service
 public class OperationInvocationService {
@@ -122,7 +122,7 @@ public class OperationInvocationService {
         ObjectModel candidate = new ObjectModel(new ObjectModelId("snapshot-" + invocationId),
                 "After " + resolved.operation().name(), execution.candidateState().objects(), execution.candidateState().links());
         Project candidateProject = new Project(project.id(), project.metadata(), project.modelText(), project.umlModel(),
-                candidate, project.layout());
+                candidate, project.layout(), project.definitions());
         var validation = validationService.validate(candidateProject);
         if (!validation.findings().isEmpty()) {
             addNotEvaluatedContracts(resolved.operation(), OperationConstraintKind.POSTCONDITION, contractResults);
@@ -150,7 +150,7 @@ public class OperationInvocationService {
                     "Fuer diese Operation ist noch keine ausfuehrbare Semantik registriert.",
                     Map.of("operationId", resolved.operation().id().value()));
         }
-        var definitions = new OclModelDefinitionFactory().definitions(project.umlModel());
+        var definitions = new OclProjectDefinitionFactory().definitions(project);
         var body = definitions.stream()
                 .filter(definition -> resolved.operation().id().equals(definition.operationId()))
                 .findFirst().orElseThrow();

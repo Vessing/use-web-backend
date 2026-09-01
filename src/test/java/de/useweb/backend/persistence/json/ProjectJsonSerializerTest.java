@@ -17,6 +17,8 @@ import de.useweb.backend.domain.layout.Viewport;
 import de.useweb.backend.domain.modeltext.ModelText;
 import de.useweb.backend.domain.ocl.OclExpression;
 import de.useweb.backend.domain.ocl.OclExpressionId;
+import de.useweb.backend.domain.ocl.OclDefinitionElement;
+import de.useweb.backend.domain.ocl.OclDefinitionElementId;
 import de.useweb.backend.domain.project.Project;
 import de.useweb.backend.domain.project.ProjectId;
 import de.useweb.backend.domain.project.ProjectMetadata;
@@ -41,6 +43,7 @@ import de.useweb.backend.domain.uml.UmlAttribute;
 import de.useweb.backend.domain.uml.UmlAttributeId;
 import de.useweb.backend.domain.uml.UmlClass;
 import de.useweb.backend.domain.uml.UmlClassId;
+import de.useweb.backend.domain.uml.UmlClassifierValue;
 import de.useweb.backend.domain.uml.UmlInvariant;
 import de.useweb.backend.domain.uml.UmlInvariantId;
 import de.useweb.backend.domain.uml.UmlModel;
@@ -50,6 +53,8 @@ import de.useweb.backend.domain.uml.UmlOperationId;
 import de.useweb.backend.domain.uml.UmlOperationContract;
 import de.useweb.backend.domain.uml.UmlParameter;
 import de.useweb.backend.domain.uml.UmlParameterId;
+import de.useweb.backend.domain.uml.UmlPackage;
+import de.useweb.backend.domain.uml.UmlPackageId;
 import de.useweb.backend.domain.uml.ParameterDirection;
 import de.useweb.backend.domain.uml.UmlVisibility;
 import de.useweb.backend.domain.uml.UmlQualifierDefinition;
@@ -92,6 +97,7 @@ class ProjectJsonSerializerTest {
                 .satisfies(operation -> {
                     assertThat(operation.query()).isTrue();
                     assertThat(operation.abstractOperation()).isFalse();
+                    assertThat(operation.staticOperation()).isTrue();
                     assertThat(operation.parameters().getFirst().direction()).isEqualTo(ParameterDirection.INOUT);
                     assertThat(operation.parameters().getFirst().position()).isZero();
                     assertThat(operation.contracts()).singleElement().satisfies(contract -> {
@@ -99,7 +105,21 @@ class ProjectJsonSerializerTest {
                         assertThat(contract.kind()).isEqualTo(UmlOperationContract.Kind.PRE);
                         assertThat(contract.enabled()).isTrue();
                     });
+                    assertThat(operation.redefinedOperationIds()).containsExactly(new UmlOperationId("op-party-can-borrow"));
                 });
+        assertThat(restored.umlModel().findClass(new UmlClassId("class-user")).orElseThrow().attributes().getFirst()
+                .redefinedAttributeIds()).containsExactly(new UmlAttributeId("attr-party-name"));
+        assertThat(restored.umlModel().findAttribute(new UmlAttributeId("attr-next-user-number"))).get()
+                .satisfies(attribute -> {
+                    assertThat(attribute.staticAttribute()).isTrue();
+                    assertThat(attribute.classifierValue().value()).isEqualTo(1043);
+                });
+        assertThat(restored.definitions()).singleElement().satisfies(definition -> {
+            assertThat(definition.id().value()).isEqualTo("definition-library-size");
+            assertThat(definition.ownerKind()).isEqualTo(OclDefinitionElement.OwnerKind.PACKAGE);
+            assertThat(definition.ownerId()).isEqualTo("package-library");
+            assertThat(definition.expression()).isEqualTo("42");
+        });
     }
 
     @Test
@@ -147,21 +167,34 @@ class ProjectJsonSerializerTest {
         UmlAttributeId userNameAttributeId = new UmlAttributeId("attr-user-name");
         UmlAttributeId bookTitleAttributeId = new UmlAttributeId("attr-book-title");
 
+        UmlClass partyClass = new UmlClass(new UmlClassId("class-party"), "Party",
+                List.of(new UmlAttribute(new UmlAttributeId("attr-party-name"), "name", UmlType.STRING)),
+                List.of(new UmlOperation(new UmlOperationId("op-party-can-borrow"), "canBorrow", UmlType.BOOLEAN,
+                        List.of(new UmlParameter(new UmlParameterId("param-party-book"), "book",
+                                UmlType.classType("Book"), ParameterDirection.INOUT, 0)), null,
+                        UmlVisibility.PUBLIC, false, true, true, List.of(), List.of())));
+
         UmlClass userClass = new UmlClass(
                 userClassId,
                 "User",
                 List.of(
-                        new UmlAttribute(userNameAttributeId, "name", UmlType.STRING),
-                        new UmlAttribute(userBooksAttributeId, "books", UmlType.INTEGER)),
+                        new UmlAttribute(userNameAttributeId, "name", UmlType.STRING, false, null, null,
+                                UmlVisibility.PUBLIC, List.of(new UmlAttributeId("attr-party-name"))),
+                        new UmlAttribute(userBooksAttributeId, "books", UmlType.INTEGER),
+                        new UmlAttribute(new UmlAttributeId("attr-next-user-number"), "nextUserNumber",
+                                UmlType.INTEGER, false, null, null, UmlVisibility.PUBLIC, List.of(), true,
+                                new UmlClassifierValue(UmlType.INTEGER, 1043))),
                 List.of(new UmlOperation(
                         new UmlOperationId("op-user-can-borrow"),
                         "canBorrow",
                         UmlType.BOOLEAN,
                         List.of(new UmlParameter(new UmlParameterId("param-book"), "book",
                                 UmlType.classType("Book"), ParameterDirection.INOUT, 0)),
-                        null, UmlVisibility.PUBLIC, false, true,
+                        null, UmlVisibility.PUBLIC, false, true, true,
                         List.of(new UmlOperationContract("contract-book-required", "BookRequired",
-                                UmlOperationContract.Kind.PRE, "not book.oclIsUndefined()", true)))));
+                                UmlOperationContract.Kind.PRE, "not book.oclIsUndefined()", true)),
+                        List.of(new UmlOperationId("op-party-can-borrow")))),
+                false, List.of(partyClass.id()));
         UmlClass bookClass = new UmlClass(
                 bookClassId,
                 "Book",
@@ -198,9 +231,10 @@ class ProjectJsonSerializerTest {
         UmlModel umlModel = new UmlModel(
                 new UmlModelId("uml-library"),
                 "Library",
-                List.of(userClass, bookClass, loanClass),
+                List.of(partyClass, userClass, bookClass, loanClass),
                 List.of(borrows),
-                List.of(maxBooks));
+                List.of(maxBooks), List.of(),
+                List.of(new UmlPackage(new UmlPackageId("package-library"), "library")), List.of(), List.of());
 
         ObjectInstance alice = new ObjectInstance(
                 new ObjectInstanceId("obj-alice"),
@@ -254,6 +288,9 @@ class ProjectJsonSerializerTest {
                         "test-fixture"),
                 umlModel,
                 new ObjectModel(new ObjectModelId("snapshot-main"), "Main Snapshot", List.of(alice, mobyDick, loan), List.of(link)),
-                layout);
+                layout,
+                List.of(new OclDefinitionElement(new OclDefinitionElementId("definition-library-size"),
+                        OclDefinitionElement.Kind.PROPERTY_DEF, OclDefinitionElement.OwnerKind.PACKAGE,
+                        "package-library", "librarySize", UmlType.INTEGER, List.of(), "42")));
     }
 }
