@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import de.useweb.backend.domain.project.Project;
 import de.useweb.backend.domain.project.ProjectId;
+import de.useweb.backend.domain.layout.LayoutInformation;
 
 @Repository
 public class InMemoryProjectRepository implements ProjectRepository {
@@ -19,6 +20,18 @@ public class InMemoryProjectRepository implements ProjectRepository {
     public Project save(Project project) {
         projects.put(project.id(), project);
         return project;
+    }
+
+    @Override
+    public Optional<Project> updateLayout(ProjectId projectId, LayoutInformation layout) {
+        return Optional.ofNullable(projects.computeIfPresent(projectId, (ignored, current) -> new Project(
+                current.id(),
+                current.metadata(),
+                current.modelText(),
+                current.umlModel(),
+                current.objectModel(),
+                layout,
+                current.definitions())));
     }
 
     @Override

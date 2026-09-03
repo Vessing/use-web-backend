@@ -28,6 +28,8 @@ import de.useweb.backend.api.dto.uml.UmlModelImportDto;
 import de.useweb.backend.api.dto.uml.UmlParameterDto;
 import de.useweb.backend.api.mapper.ProjectDtoMapper;
 import de.useweb.backend.application.project.ProjectService;
+import de.useweb.backend.application.modeltext.UseModelTextRenderer;
+import de.useweb.backend.domain.modeltext.ModelText;
 import de.useweb.backend.domain.layout.DiagramLayout;
 import de.useweb.backend.domain.layout.LayoutInformation;
 import de.useweb.backend.domain.project.Project;
@@ -80,10 +82,12 @@ public class UmlModelService {
     private static final String UNKNOWN_ATTRIBUTE = "UNKNOWN_ATTRIBUTE";
 
     private final ProjectService projectService;
+    private final UseModelTextRenderer modelTextRenderer;
     private final StructuredUmlTypeService structuredTypes = new StructuredUmlTypeService();
 
     public UmlModelService(ProjectService projectService) {
         this.projectService = projectService;
+        this.modelTextRenderer = new UseModelTextRenderer();
     }
 
     public UmlModelDto getUmlModel(ProjectId projectId) {
@@ -1100,7 +1104,7 @@ public class UmlModelService {
         return new UmlAssociationEnd(
                 new UmlAssociationEndId(idOrGenerated(input.id(), "end")),
                 classId,
-                requireName(input.roleName(), "roleName"),
+                optionalRoleName(input.roleName()),
                 multiplicity(input.multiplicity()),
                 input.navigable(), Boolean.TRUE.equals(input.ordered()), !Boolean.FALSE.equals(input.unique()),
                 Boolean.TRUE.equals(input.derived()), Boolean.TRUE.equals(input.union()),
@@ -1123,7 +1127,7 @@ public class UmlModelService {
         }
         UmlClassId classId = new UmlClassId(input.classId());
         requireClass(model, classId);
-        return new UmlAssociationEnd(endId, classId, requireName(input.roleName(), "roleName"),
+        return new UmlAssociationEnd(endId, classId, optionalRoleName(input.roleName()),
                 multiplicity(input.multiplicity()), input.navigable(), Boolean.TRUE.equals(input.ordered()),
                 !Boolean.FALSE.equals(input.unique()), Boolean.TRUE.equals(input.derived()),
                 Boolean.TRUE.equals(input.union()),
@@ -1244,6 +1248,10 @@ public class UmlModelService {
         return value.trim();
     }
 
+    private String optionalRoleName(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     private UmlModel validatedModel(UmlModel current, List<UmlClass> classes) {
         try {
             return new UmlModel(current.id(), current.name(), classes, current.associations(), current.invariants(),
@@ -1290,7 +1298,7 @@ public class UmlModelService {
         return projectService.saveProject(new Project(
                 project.id(),
                 project.metadata(),
-                project.modelText(),
+                canonicalModelText(project, updatedModel),
                 updatedModel,
                 project.objectModel(),
                 project.layout(),
@@ -1301,11 +1309,23 @@ public class UmlModelService {
         return projectService.saveProject(new Project(
                 project.id(),
                 project.metadata(),
-                project.modelText(),
+                canonicalModelText(project, updatedModel),
                 updatedModel,
                 updatedObjectModel,
                 updatedLayout,
                 project.definitions()));
+    }
+
+    private ModelText canonicalModelText(Project project, UmlModel model) {
+        ModelText existing = project.modelText();
+        return new ModelText(modelTextRenderer.render(model),
+                existing == null ? "USE_MODEL_TEXT" : existing.language(),
+                existing == null ? "mvp-subset" : existing.languageVersion(),
+                project.metadata().updatedAt(),
+                existing == null ? null : existing.sourceName(),
+                existing == null ? "generated" : existing.sourceOrigin(),
+                existing == null ? List.of() : existing.sources(),
+                existing == null ? List.of() : existing.sourceFiles());
     }
 
     @SafeVarargs

@@ -55,9 +55,9 @@ public record UmlAssociationEnd(
         if (classId == null) {
             throw new IllegalArgumentException("UmlAssociationEnd classId must not be null");
         }
-        if (roleName == null || roleName.isBlank()) {
-            throw new IllegalArgumentException("UmlAssociationEnd roleName must not be blank");
-        }
+        // UML Properties used as association ends may be unnamed. The stable end id,
+        // rather than a display role, identifies an end throughout the model.
+        roleName = roleName == null || roleName.isBlank() ? null : roleName.trim();
         if (multiplicity == null) {
             throw new IllegalArgumentException("UmlAssociationEnd multiplicity must not be null");
         }

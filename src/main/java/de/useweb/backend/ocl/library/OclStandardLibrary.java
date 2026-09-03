@@ -18,7 +18,8 @@ public final class OclStandardLibrary {
         if (name.equals("oclType") && arguments.isEmpty()) {
             return Optional.of(OclType.classifierValueType(receiver));
         }
-        if ((name.equals("oclIsUndefined") || name.equals("oclIsInvalid")) && arguments.isEmpty()) {
+        if ((name.equals("oclIsUndefined") || name.equals("oclIsInvalid")
+                || name.equals("isUndefined") || name.equals("isDefined")) && arguments.isEmpty()) {
             return Optional.of(OclType.BOOLEAN);
         }
         if (arguments.isEmpty() && (receiver.kind() == OclType.Kind.VOID
@@ -112,7 +113,8 @@ public final class OclStandardLibrary {
     }
 
     public static boolean hasOperation(OclType receiver, String name) {
-        if (name.equals("oclIsUndefined") || name.equals("oclIsInvalid") || name.equals("oclType")) return true;
+        if (name.equals("oclIsUndefined") || name.equals("oclIsInvalid") || name.equals("oclType")
+                || name.equals("isUndefined") || name.equals("isDefined")) return true;
         if (receiver.kind() == OclType.Kind.STRING) {
             return List.of("size", "concat", "substring", "toUpperCase", "toLowerCase", "indexOf",
                     "equalsIgnoreCase", "at", "characters", "toBoolean", "toInteger", "toReal", "toString")

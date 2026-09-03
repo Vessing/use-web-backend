@@ -410,7 +410,8 @@ public class SnapshotCommandService {
             case "ASSOCIATION" -> project.umlModel().associations().stream()
                     .filter(value -> value.id().value().equals(id)).map(value -> value.name()).findFirst().orElse(id);
             case "ASSOCIATION_END" -> project.umlModel().associations().stream().flatMap(value -> value.ends().stream())
-                    .filter(value -> value.id().value().equals(id)).map(value -> value.roleName()).findFirst().orElse(id);
+                    .filter(value -> value.id().value().equals(id)).map(value -> value.roleName() == null
+                            ? value.id().value() : value.roleName()).findFirst().orElse(id);
             case "QUALIFIER" -> project.umlModel().associations().stream().flatMap(value -> value.ends().stream())
                     .flatMap(value -> value.qualifiers().stream()).filter(value -> value.id().value().equals(id))
                     .map(value -> value.name()).findFirst().orElse(id);

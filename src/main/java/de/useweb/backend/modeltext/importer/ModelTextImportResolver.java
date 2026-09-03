@@ -79,7 +79,7 @@ public class ModelTextImportResolver {
         ResolutionState state = new ResolutionState(repository);
         resolveSource(entry, Selection.allElements(), null, 0, UNKNOWN_RANGE, state);
         return new ResolvedModel(state.accumulator.result(state.modelName, state.diagnostics),
-                List.copyOf(state.provenance));
+                List.copyOf(state.provenance), state.accumulator.elementSources());
     }
 
     private void resolveSource(String sourcePath, Selection selection, String importedBy, int depth,
@@ -164,7 +164,7 @@ public class ModelTextImportResolver {
         OclDiagnosticDto diagnostic = diagnostic(code, message, source, null, UNKNOWN_RANGE,
                 Map.of("technicalMessage", technicalMessage == null ? "" : technicalMessage));
         return new ResolvedModel(new ModelTextParseResult(null, List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of(), List.of(diagnostic)), List.of());
+                List.of(), List.of(), List.of(), List.of(diagnostic)), List.of(), Map.of());
     }
 
     private OclDiagnosticDto withSource(OclDiagnosticDto diagnostic, String sourcePath) {
@@ -222,7 +222,15 @@ public class ModelTextImportResolver {
         return path.toString().replace('\\', '/');
     }
 
-    public record ResolvedModel(ModelTextParseResult model, List<ModelTextSourceProvenance> provenance) {
+    public record ResolvedModel(ModelTextParseResult model, List<ModelTextSourceProvenance> provenance,
+            Map<String, String> elementSources) {
+        public ResolvedModel(ModelTextParseResult model, List<ModelTextSourceProvenance> provenance) {
+            this(model, provenance, Map.of());
+        }
+
+        public ResolvedModel {
+            elementSources = Map.copyOf(elementSources == null ? Map.of() : elementSources);
+        }
     }
 
     private interface SourceRepository {
@@ -340,19 +348,32 @@ public class ModelTextImportResolver {
         private final Map<String, ModelTextAssociation> associations = new LinkedHashMap<>();
         private final Map<String, ModelTextInvariant> invariants = new LinkedHashMap<>();
         private final Map<String, ModelTextOperationContext> operationContexts = new LinkedHashMap<>();
+        private final Map<String, String> elementSources = new LinkedHashMap<>();
 
         private void add(ModelTextParseResult parsed, Selection selection, String source,
                 List<OclDiagnosticDto> diagnostics) {
             parsed.classes().stream().filter(type -> selection.includes(type.name()))
-                    .forEach(type -> put(classes, type.name(), type, "CLASS", source, diagnostics));
+                    .forEach(type -> {
+                        put(classes, type.name(), type, "CLASS", source, diagnostics);
+                        elementSources.putIfAbsent("CLASS:" + type.name(), source);
+                    });
             parsed.enumerations().stream().filter(type -> selection.includes(type.name()))
-                    .forEach(type -> put(enumerations, type.name(), type, "ENUMERATION", source, diagnostics));
+                    .forEach(type -> {
+                        put(enumerations, type.name(), type, "ENUMERATION", source, diagnostics);
+                        elementSources.putIfAbsent("ENUMERATION:" + type.name(), source);
+                    });
             parsed.dataTypes().stream().filter(type -> selection.includes(type.name()))
-                    .forEach(type -> put(dataTypes, type.name(), type, "DATATYPE", source, diagnostics));
+                    .forEach(type -> {
+                        put(dataTypes, type.name(), type, "DATATYPE", source, diagnostics);
+                        elementSources.putIfAbsent("DATATYPE:" + type.name(), source);
+                    });
             parsed.associations().stream()
                     .filter(value -> selection.includes(value.name())
                             || value.associationClassName() != null && selection.includes(value.associationClassName()))
-                    .forEach(value -> put(associations, value.name(), value, "ASSOCIATION", source, diagnostics));
+                    .forEach(value -> {
+                        put(associations, value.name(), value, "ASSOCIATION", source, diagnostics);
+                        elementSources.putIfAbsent("ASSOCIATION:" + value.name(), source);
+                    });
             parsed.invariants().stream().filter(value -> selection.includes(value.contextClass()))
                     .forEach(value -> put(invariants, value.contextClass() + "::" + value.name(), value,
                             "INVARIANT", source, diagnostics));
@@ -385,6 +406,10 @@ public class ModelTextImportResolver {
                     List.copyOf(enumerations.values()), List.copyOf(dataTypes.values()),
                     List.copyOf(associations.values()), List.copyOf(invariants.values()),
                     List.copyOf(operationContexts.values()), List.copyOf(diagnostics));
+        }
+
+        private Map<String, String> elementSources() {
+            return Map.copyOf(elementSources);
         }
     }
 

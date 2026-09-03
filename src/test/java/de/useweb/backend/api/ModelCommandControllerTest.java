@@ -57,6 +57,33 @@ class ModelCommandControllerTest {
     }
 
     @Test
+    void movesClassToNamespaceAndProjectsTheNewExplorerParent() throws Exception {
+        String projectId = createProject("Class namespace");
+        command(projectId, "/packages", revision(projectId),
+                "{\"id\":\"package-people\",\"name\":\"people\",\"qualifiedName\":\"university::people\"}", 201);
+        command(projectId, "/classes", revision(projectId),
+                "{\"id\":\"person\",\"name\":\"Person\",\"attributes\":[],\"operations\":[],\"superClassIds\":[]}", 201);
+
+        String expectedRevision = revision(projectId);
+        mockMvc.perform(put("/api/v1/projects/{projectId}/commands/classes/{classId}", projectId, "person")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(commandBody(expectedRevision, """
+                                {"id":"person","name":"Person","attributes":[],"operations":[],
+                                 "abstractClass":false,"superClassIds":[],"visibility":"PUBLIC",
+                                 "packageId":"package-people"}
+                                """)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.packageId", equalTo("package-people")));
+
+        mockMvc.perform(get("/api/v1/projects/{projectId}/read-model", projectId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.explorer[?(@.elementId == 'person')].parentNodeId",
+                        equalTo(java.util.List.of("package-people"))))
+                .andExpect(jsonPath("$.explorer[?(@.elementId == 'person')].qualifiedName",
+                        equalTo(java.util.List.of("university::people::Person"))));
+    }
+
+    @Test
     void rejectsInvalidAssociationWithFieldDiagnosticAndKeepsDraft() throws Exception {
         String projectId = createProject("B36 association diagnostic");
         String revision = revision(projectId);
@@ -499,6 +526,29 @@ class ModelCommandControllerTest {
                 .andExpect(jsonPath("$.code", equalTo("INVALID_OPERATION_CONTRACT_KIND")))
                 .andExpect(jsonPath("$.details.field", equalTo("contracts.around.kind")));
         assertThat(revision(projectId)).isEqualTo(stable);
+    }
+
+    @Test
+    void layoutSaveDoesNotMakeSubsequentOperationCommandStale() throws Exception {
+        String projectId = createProject("Layout and operation command");
+        command(projectId, "/classes", revision(projectId),
+                "{\"id\":\"person\",\"name\":\"Person\",\"attributes\":[],\"operations\":[],\"superClassIds\":[]}", 201);
+        String modelRevision = revision(projectId);
+
+        mockMvc.perform(put("/api/v1/projects/{projectId}/layout", projectId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "classDiagram": {"nodes": [], "edges": [], "viewport": null},
+                                  "objectDiagram": {"nodes": [], "edges": [], "viewport": null}
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        command(projectId, "/classes/person/operations", modelRevision, """
+                {"id":"label","name":"label","returnType":"String","parameters":[],
+                 "bodyExpression":"'Person'","query":true,"contracts":[]}
+                """, 201);
     }
 
     @Test

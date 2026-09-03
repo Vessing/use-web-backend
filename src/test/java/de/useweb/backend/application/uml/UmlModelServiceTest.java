@@ -100,6 +100,23 @@ class UmlModelServiceTest {
     }
 
     @Test
+    void permitsAssociationEndsWithoutRoleNames() {
+        Project project = projectService.createProject("Unnamed association", null);
+        UmlClassDto left = umlModelService.createClass(project.id(), new UmlClassDto("class-left", "Left", List.of(), List.of()));
+        UmlClassDto right = umlModelService.createClass(project.id(), new UmlClassDto("class-right", "Right", List.of(), List.of()));
+
+        UmlAssociationDto association = umlModelService.createAssociation(project.id(), new UmlAssociationDto(
+                "assoc-unnamed", "Unnamed", List.of(
+                        new UmlAssociationEndDto("end-left", left.id(), null, new MultiplicityDto(1, 1, false, "1"), true),
+                        new UmlAssociationEndDto("end-right", right.id(), " ", new MultiplicityDto(0, null, true, "*"), true))));
+
+        assertThat(association.ends()).extracting(UmlAssociationEndDto::roleName).containsExactly(null, null);
+        assertThat(projectService.loadProject(project.id()).umlModel().associations()).singleElement()
+                .satisfies(saved -> assertThat(saved.ends()).extracting(end -> end.id().value())
+                        .containsExactly("end-left", "end-right"));
+    }
+
+    @Test
     void permitsOverloadsButRejectsDuplicateOperationSignatures() {
         Project project = projectService.createProject("Operations", "B9 overload validation");
         UmlClassDto owner = umlModelService.createClass(project.id(),

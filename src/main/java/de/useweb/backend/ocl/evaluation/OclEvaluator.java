@@ -1303,7 +1303,7 @@ public class OclEvaluator {
     private Optional<NavigationTarget> navigationTarget(UmlAssociation association, UmlClass receiverClass, String roleName) {
         return association.ends().stream()
                 .filter(target -> de.useweb.backend.ocl.profile.OclOptionalCompliancePolicy.mayNavigate(target)
-                        && target.roleName().equals(roleName))
+                        && java.util.Objects.equals(target.roleName(), roleName))
                 .flatMap(target -> association.ends().stream()
                         .filter(source -> !source.id().equals(target.id())
                                 && source.classId().equals(receiverClass.id()))
@@ -1569,7 +1569,8 @@ public class OclEvaluator {
     }
 
     private boolean isOclAnyOperation(String name) {
-        return name.equals("oclIsUndefined") || name.equals("oclIsInvalid") || name.equals("oclType");
+        return name.equals("oclIsUndefined") || name.equals("oclIsInvalid") || name.equals("oclType")
+                || name.equals("isUndefined") || name.equals("isDefined");
     }
 
     private Optional<OclValue> standardOperation(OclValue receiver, String name, List<OclValue> arguments,
@@ -1581,6 +1582,9 @@ public class OclEvaluator {
         }
         if (name.equals("oclIsUndefined") && arguments.isEmpty()) return Optional.of(new BooleanValue(isUndefined(receiver)));
         if (name.equals("oclIsInvalid") && arguments.isEmpty()) return Optional.of(new BooleanValue(receiver instanceof OclInvalidValue));
+        // USE aliases use the same definedness relation as the existing OCL undefined check.
+        if (name.equals("isUndefined") && arguments.isEmpty()) return Optional.of(new BooleanValue(isUndefined(receiver)));
+        if (name.equals("isDefined") && arguments.isEmpty()) return Optional.of(new BooleanValue(!isUndefined(receiver)));
         Optional<OclValue> primitive = OclPrimitiveLibrary.evaluate(receiver, name, arguments);
         if (primitive.isPresent()) return primitive;
         if (isUndefined(receiver) && isProducingCollectionOperation(name)) {

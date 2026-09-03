@@ -88,8 +88,9 @@ public record UmlModel(
                                     "classId", end.classId().value()));
                 }
             }
-            if (association.ends().stream().map(UmlAssociationEnd::roleName).distinct().count()
-                    != association.ends().size()) {
+            List<String> namedRoles = association.ends().stream().map(UmlAssociationEnd::roleName)
+                    .filter(roleName -> roleName != null && !roleName.isBlank()).toList();
+            if (namedRoles.stream().distinct().count() != namedRoles.size()) {
                 boolean reflexive = association.ends().stream().map(UmlAssociationEnd::classId).distinct().count() == 1;
                 throw associationError(reflexive ? "AMBIGUOUS_REFLEXIVE_ROLE" : "AMBIGUOUS_ASSOCIATION_ROLE",
                         "Association ends must have distinct role names",

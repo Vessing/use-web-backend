@@ -11,6 +11,7 @@ import de.useweb.backend.api.dto.layout.LayoutDto;
 import de.useweb.backend.api.dto.layout.NodeLayoutDto;
 import de.useweb.backend.api.dto.layout.ViewportDto;
 import de.useweb.backend.api.dto.modeltext.ModelTextDto;
+import de.useweb.backend.api.dto.modeltext.ModelTextSourceFileDto;
 import de.useweb.backend.api.dto.modeltext.ModelTextSourceProvenanceDto;
 import de.useweb.backend.api.dto.ocl.OclExpressionDto;
 import de.useweb.backend.api.dto.ocl.SourceRangeDto;
@@ -54,6 +55,7 @@ import de.useweb.backend.domain.layout.Point;
 import de.useweb.backend.domain.layout.Viewport;
 import de.useweb.backend.domain.modeltext.ModelText;
 import de.useweb.backend.domain.modeltext.ModelTextSourceProvenance;
+import de.useweb.backend.domain.modeltext.ModelTextSourceFile;
 import de.useweb.backend.domain.ocl.OclExpression;
 import de.useweb.backend.domain.ocl.OclExpressionId;
 import de.useweb.backend.domain.ocl.OclDefinitionElement;
@@ -249,7 +251,9 @@ public final class ProjectDtoMapper {
                 modelText.updatedAt(),
                 modelText.sources().stream().map(source -> new ModelTextSourceProvenanceDto(
                         source.sourcePath(), source.importedBy(), source.selectedNames(), source.depth(), source.sha256()))
-                        .toList());
+                        .toList(),
+                modelText.sourceFiles().stream().map(source ->
+                        new ModelTextSourceFileDto(source.sourcePath(), source.text())).toList());
     }
 
     public static ModelText toDomain(ModelTextDto dto) {
@@ -265,7 +269,9 @@ public final class ProjectDtoMapper {
                 dto.sourceOrigin(),
                 safe(dto.sources()).stream().map(source -> new ModelTextSourceProvenance(
                         source.sourcePath(), source.importedBy(), source.selectedNames(), source.depth(), source.sha256()))
-                        .toList());
+                        .toList(),
+                safe(dto.sourceFiles()).stream().map(source ->
+                        new ModelTextSourceFile(source.sourcePath(), source.text())).toList());
     }
 
     public static UmlModelDto toDto(UmlModel model) {
@@ -625,11 +631,11 @@ public final class ProjectDtoMapper {
                                 new SlotValue(value.value().value(), typeOf(value.value().type())))).toList());
     }
 
-    private static LayoutDto toDto(LayoutInformation layout) {
+    public static LayoutDto toDto(LayoutInformation layout) {
         return new LayoutDto(toDto(layout.classDiagram()), toDto(layout.objectDiagram()));
     }
 
-    private static LayoutInformation toDomain(LayoutDto dto) {
+    public static LayoutInformation toDomain(LayoutDto dto) {
         return new LayoutInformation(toDomain(dto.classDiagram()), toDomain(dto.objectDiagram()));
     }
 

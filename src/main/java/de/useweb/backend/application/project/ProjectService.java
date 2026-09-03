@@ -103,6 +103,14 @@ public class ProjectService {
         return saveProject(replacement);
     }
 
+    public Project saveLayout(ProjectId projectId, LayoutInformation layout) {
+        if (layout == null) {
+            throw new IllegalArgumentException("Project layout must not be null");
+        }
+        return projectRepository.updateLayout(projectId, layout)
+                .orElseThrow(() -> new ProjectNotFoundException(projectId));
+    }
+
     public String exportProject(ProjectId projectId) {
         return projectJsonSerializer.serialize(loadProject(projectId));
     }

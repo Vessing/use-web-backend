@@ -3,7 +3,9 @@ package de.useweb.backend.application.modeltext;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -21,6 +23,7 @@ import de.useweb.backend.application.ocl.OclParseService;
 import de.useweb.backend.application.ocl.OclDiagnosticMapper;
 import de.useweb.backend.application.project.ProjectService;
 import de.useweb.backend.domain.modeltext.ModelText;
+import de.useweb.backend.domain.modeltext.ModelTextSourceFile;
 import de.useweb.backend.domain.ocl.OclExpression;
 import de.useweb.backend.domain.ocl.OclExpressionId;
 import de.useweb.backend.domain.project.Project;
@@ -83,6 +86,7 @@ public class ModelTextApplicationService {
     private final ModelTextParser modelTextParser;
     private final OclParseService oclParseService;
     private final ModelTextImportResolver importResolver;
+    private final UseModelTextRenderer renderer;
     private final Clock clock;
     private final OclParser oclParser = new OclParser();
     private final OclTypeChecker oclTypeChecker = new OclTypeChecker();
@@ -90,19 +94,25 @@ public class ModelTextApplicationService {
 
     @Autowired
     public ModelTextApplicationService(ProjectService projectService, ModelTextParser modelTextParser, OclParseService oclParseService) {
-        this(projectService, modelTextParser, oclParseService, new ModelTextImportResolver(modelTextParser), Clock.systemUTC());
+        this(projectService, modelTextParser, oclParseService, new ModelTextImportResolver(modelTextParser), new UseModelTextRenderer(), Clock.systemUTC());
     }
 
     public ModelTextApplicationService(ProjectService projectService, ModelTextParser modelTextParser, OclParseService oclParseService, Clock clock) {
-        this(projectService, modelTextParser, oclParseService, new ModelTextImportResolver(modelTextParser), clock);
+        this(projectService, modelTextParser, oclParseService, new ModelTextImportResolver(modelTextParser), new UseModelTextRenderer(), clock);
     }
 
     public ModelTextApplicationService(ProjectService projectService, ModelTextParser modelTextParser,
             OclParseService oclParseService, ModelTextImportResolver importResolver, Clock clock) {
+        this(projectService, modelTextParser, oclParseService, importResolver, new UseModelTextRenderer(), clock);
+    }
+
+    public ModelTextApplicationService(ProjectService projectService, ModelTextParser modelTextParser,
+            OclParseService oclParseService, ModelTextImportResolver importResolver, UseModelTextRenderer renderer, Clock clock) {
         this.projectService = projectService;
         this.modelTextParser = modelTextParser;
         this.oclParseService = oclParseService;
         this.importResolver = importResolver;
+        this.renderer = renderer;
         this.clock = clock;
     }
 
@@ -119,7 +129,7 @@ public class ModelTextApplicationService {
         Project currentProject = projectService.loadProject(projectId);
         String text = request == null ? "" : request.modelText();
         String sourceName = request == null ? null : request.sourceName();
-        Map<String, String> sourceFiles = request == null ? Map.of() : request.sourceFiles();
+        Map<String, String> sourceFiles = mergedSourceFiles(currentProject.modelText(), request);
         var resolved = importResolver.resolve(sourceName, text, sourceFiles);
         ModelTextParseResult parseResult = resolved.model();
         List<OclDiagnosticDto> diagnostics = new ArrayList<>(parseResult.diagnostics());
@@ -132,7 +142,9 @@ public class ModelTextApplicationService {
                 Instant.now(clock),
                 sourceName,
                 request == null ? null : firstNonBlank(request.sourceOrigin(), request.sourceFormat()),
-                resolved.provenance());
+                resolved.provenance(),
+                sourceFiles.entrySet().stream().map(source ->
+                        new ModelTextSourceFile(source.getKey(), source.getValue())).toList());
 
         boolean hasErrors = diagnostics.stream().anyMatch(diagnostic -> "ERROR".equalsIgnoreCase(diagnostic.severity()));
         boolean hasSupportedModelParts = parseResult.hasSupportedModelParts();
@@ -154,6 +166,10 @@ public class ModelTextApplicationService {
             changedElementIds = List.of();
         } else {
             UmlModel umlModel = importedModel;
+            modelText = new ModelText(
+                    renderer.render(umlModel),
+                    modelText.language(), modelText.languageVersion(), modelText.updatedAt(), modelText.sourceName(),
+                    modelText.sourceOrigin(), modelText.sources(), modelText.sourceFiles());
             projectToSave = new Project(
                     currentProject.id(),
                     currentProject.metadata(),
@@ -180,6 +196,17 @@ public class ModelTextApplicationService {
     private Project projectWithModelText(Project project, ModelText modelText) {
         return new Project(project.id(), project.metadata(), modelText, project.umlModel(), project.objectModel(),
                 project.layout(), project.definitions());
+    }
+
+    private Map<String, String> mergedSourceFiles(ModelText currentModelText, ApplyModelTextRequestDto request) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (currentModelText != null && (request == null || !request.replaceSourceFiles())) {
+            currentModelText.sourceFiles().forEach(source -> result.put(source.sourcePath(), source.text()));
+        }
+        if (request != null) {
+            result.putAll(request.sourceFiles());
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     private String defaultModelText(Project project) {
@@ -310,10 +337,11 @@ public class ModelTextApplicationService {
         Map<String, List<UmlAssociationEndId>> result = new HashMap<>();
         for (ModelTextAssociation association : associations) {
             String associationKey = kebab(association.name());
-            for (ModelTextAssociationEnd end : association.ends()) {
+            for (int endIndex = 0; endIndex < association.ends().size(); endIndex++) {
+                ModelTextAssociationEnd end = association.ends().get(endIndex);
                 String roleName = effectiveRoleName(end);
                 result.computeIfAbsent(roleName, ignored -> new ArrayList<>())
-                        .add(associationEndId(associationKey, roleName));
+                        .add(associationEndId(associationKey, roleName, endIndex));
             }
         }
         return result;
@@ -337,9 +365,10 @@ public class ModelTextApplicationService {
     private UmlAssociationEnd toUmlAssociationEnd(String associationKey, String associationKind, int endIndex,
             ModelTextAssociationEnd end, Map<String, List<UmlAssociationEndId>> endIdsByRole) {
         String roleName = effectiveRoleName(end);
+        UmlAssociationEndId endId = associationEndId(associationKey, roleName, endIndex);
         int[] qualifierOrder = {0};
         return new UmlAssociationEnd(
-                associationEndId(associationKey, roleName),
+                endId,
                 new UmlClassId("class-" + kebab(end.className())),
                 roleName,
                 multiplicity(end.multiplicity()),
@@ -350,16 +379,17 @@ public class ModelTextApplicationService {
                 end.union(),
                 end.subsettedRoleNames().stream().map(role -> resolveAssociationEndId(role, endIdsByRole)).toList(),
                 end.redefinedRoleNames().stream().map(role -> resolveAssociationEndId(role, endIdsByRole)).toList(),
-                end.qualifiers().stream().map(qualifier -> qualifier(associationKey, roleName, qualifier,
+                end.qualifiers().stream().map(qualifier -> qualifier(associationKey, roleName, endId, qualifier,
                         qualifierOrder[0]++)).toList(),
                 aggregationKind(associationKind, endIndex),
                 end.deriveExpression());
     }
 
-    private UmlQualifierDefinition qualifier(String associationKey, String roleName, ModelTextParameter qualifier,
-            int order) {
+    private UmlQualifierDefinition qualifier(String associationKey, String roleName, UmlAssociationEndId associationEndId,
+            ModelTextParameter qualifier, int order) {
+        String ownerKey = roleName == null ? associationEndId.value() : associationKey + "-" + kebab(roleName);
         return new UmlQualifierDefinition(
-                new UmlQualifierId("qualifier-" + associationKey + "-" + kebab(roleName) + "-" + kebab(qualifier.name())),
+                new UmlQualifierId("qualifier-" + ownerKey + "-" + kebab(qualifier.name())),
                 qualifier.name(), typeOf(qualifier.type()), order);
     }
 
@@ -383,12 +413,22 @@ public class ModelTextApplicationService {
         return candidates.getFirst();
     }
 
-    private String effectiveRoleName(ModelTextAssociationEnd end) {
-        return end.roleName() == null || end.roleName().isBlank() ? lowerCamel(end.className()) : end.roleName();
+    private String optionalRoleName(String roleName) {
+        return roleName == null || roleName.isBlank() ? null : roleName.trim();
     }
 
-    private UmlAssociationEndId associationEndId(String associationKey, String roleName) {
-        return new UmlAssociationEndId("assocend-" + associationKey + "-" + kebab(roleName));
+    private String effectiveRoleName(ModelTextAssociationEnd end) {
+        String explicitRoleName = optionalRoleName(end.roleName());
+        if (explicitRoleName != null) {
+            return explicitRoleName;
+        }
+        String className = end.className();
+        return Character.toLowerCase(className.charAt(0)) + className.substring(1);
+    }
+
+    private UmlAssociationEndId associationEndId(String associationKey, String roleName, int endIndex) {
+        String suffix = roleName == null ? "end-" + endIndex : kebab(roleName);
+        return new UmlAssociationEndId("assocend-" + associationKey + "-" + suffix);
     }
 
     private UmlInvariant toUmlInvariant(ModelTextInvariant invariant) {
@@ -555,10 +595,4 @@ public class ModelTextApplicationService {
                 .toLowerCase(Locale.ROOT);
     }
 
-    private String lowerCamel(String value) {
-        if (value == null || value.isBlank()) {
-            return "end";
-        }
-        return value.substring(0, 1).toLowerCase(Locale.ROOT) + value.substring(1);
-    }
 }

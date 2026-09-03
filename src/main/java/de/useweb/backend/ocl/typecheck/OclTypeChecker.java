@@ -806,7 +806,7 @@ public class OclTypeChecker {
             String roleName) {
         return association.ends().stream()
                 .filter(target -> de.useweb.backend.ocl.profile.OclOptionalCompliancePolicy.mayNavigate(target)
-                        && target.roleName().equals(roleName))
+                        && java.util.Objects.equals(target.roleName(), roleName))
                 .filter(target -> association.ends().stream().anyMatch(source -> !source.id().equals(target.id())
                         && source.classId().equals(receiverClass.id())))
                 .findFirst()
@@ -991,7 +991,8 @@ public class OclTypeChecker {
     }
 
     private boolean isOclAnyOperation(String name) {
-        return name.equals("oclIsUndefined") || name.equals("oclIsInvalid") || name.equals("oclType");
+        return name.equals("oclIsUndefined") || name.equals("oclIsInvalid") || name.equals("oclType")
+                || name.equals("isUndefined") || name.equals("isDefined");
     }
 
     private OclDiagnostic accessDenied(String featureKind, String featureName,

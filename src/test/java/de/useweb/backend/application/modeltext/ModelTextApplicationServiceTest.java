@@ -67,9 +67,43 @@ class ModelTextApplicationServiceTest {
         assertThat(saved.modelText().sources()).hasSize(3);
         assertThat(saved.modelText().sources()).extracting(source -> source.sourcePath())
                 .containsExactly("models/main.use", "models/domain/members.use", "models/shared/dates.use");
+        assertThat(saved.modelText().sourceFiles()).extracting(source -> source.sourcePath())
+                .containsExactlyInAnyOrder("models/domain/members.use", "models/shared/dates.use");
 
         Project restored = new ProjectJsonSerializer().deserialize(new ProjectJsonSerializer().serialize(saved));
         assertThat(restored.modelText().sources()).isEqualTo(saved.modelText().sources());
+        assertThat(restored.modelText().sourceFiles()).isEqualTo(saved.modelText().sourceFiles());
+    }
+
+    @Test
+    void retainsPersistedSourceBundleWhenEditorReappliesRootText() {
+        Project project = projectService.createProject("Bundle", null);
+        service.applyModelText(project.id(), new ApplyModelTextRequestDto(
+                """
+                import * from "shared/member.use"
+                model Bundle
+                class Root end
+                """,
+                "USE_MODEL_TEXT", "REPLACE_UML_MODEL", true, "bundle.use", "use", "open-existing", null,
+                Map.of("shared/member.use", "model Member\nclass Member end\n")));
+
+        ApplyModelTextResponseDto response = service.applyModelText(project.id(), new ApplyModelTextRequestDto(
+                """
+                import * from "shared/member.use"
+                model Bundle
+                class ChangedRoot end
+                """,
+                "USE_MODEL_TEXT", "REPLACE_UML_MODEL", true, "bundle.use", "use", "ocl-editor", null));
+
+        Project saved = projectService.loadProject(project.id());
+        assertThat(response.success()).as(response.diagnostics().toString()).isTrue();
+        assertThat(saved.modelText().sourceFiles()).singleElement()
+                .satisfies(source -> {
+                    assertThat(source.sourcePath()).isEqualTo("shared/member.use");
+                    assertThat(source.text()).contains("class Member");
+                });
+        assertThat(saved.umlModel().classes()).extracting(type -> type.name())
+                .containsExactly("Member", "ChangedRoot");
     }
 
     @Test
@@ -162,6 +196,46 @@ class ModelTextApplicationServiceTest {
                 .satisfies(association -> assertThat(association.ends())
                         .extracting(end -> end.classId().value())
                         .containsExactly("class-journey", "class-train"));
+        assertThat(saved.umlModel().associations().getFirst().ends())
+                .extracting(end -> end.roleName()).containsExactly("journey", "train");
+        assertThat(saved.umlModel().associations().getFirst().ends())
+                .extracting(end -> end.id().value()).containsExactly("assocend-assignment-journey", "assocend-assignment-train");
+    }
+
+    @Test
+    void derivesUseRoleNameFromClassifierAndTypechecksNavigation() {
+        Project project = projectService.createProject("Implicit roles", null);
+
+        ApplyModelTextResponseDto response = service.applyModelText(project.id(), new ApplyModelTextRequestDto(
+                """
+                model InvoiceModel
+
+                class Invoice
+                  constraints
+                    inv lineItemsAccessible: self.lineItem->size() >= 0
+                end
+
+                class LineItem end
+
+                composition Invoice_LineItem between
+                  Invoice[1]
+                  LineItem[0..*]
+                end
+                """,
+                "USE_MODEL_TEXT",
+                "REPLACE_UML_MODEL",
+                true,
+                "invoice.use",
+                "use",
+                "open-existing",
+                null));
+
+        assertThat(response.success()).as(response.diagnostics().toString()).isTrue();
+        assertThat(response.diagnostics()).isEmpty();
+        assertThat(projectService.loadProject(project.id()).umlModel().associations()).singleElement()
+                .satisfies(association -> assertThat(association.ends())
+                        .extracting(end -> end.roleName())
+                        .containsExactly("invoice", "lineItem"));
     }
 
     @Test
@@ -377,6 +451,57 @@ class ModelTextApplicationServiceTest {
 
         Project restored = new ProjectJsonSerializer().deserialize(new ProjectJsonSerializer().serialize(saved));
         assertThat(restored.umlModel()).isEqualTo(saved.umlModel());
+    }
+
+    @Test
+    void importsUseDefinednessAliasesInOperationContracts() {
+        Project project = projectService.createProject("Employee", null);
+
+        ApplyModelTextResponseDto response = service.applyModelText(project.id(), new ApplyModelTextRequestDto(
+                """
+                model Employee
+
+                class Person
+                attributes
+                  name : String
+                  age : Integer
+                  salary : Real
+                operations
+                  raiseSalary(rate : Real) : Real
+                end
+
+                class Company
+                attributes
+                  name : String
+                  location : String
+                operations
+                  hire(p : Person)
+                  fire(p : Person)
+                end
+
+                association WorksFor between
+                  Person[*] role employee
+                  Company[0..1] role employer
+                end
+
+                constraints
+                context Person::raiseSalary(rate : Real) : Real
+                  post raiseSalaryPost: salary = salary@pre * (1.0 + rate)
+                  post resultPost: result = salary
+
+                context Company::hire(p : Person)
+                  pre personProvided: p.isDefined()
+                  pre personNotEmployed: employee->excludes(p)
+                  post personEmployed: employee->includes(p)
+
+                context Company::fire(p : Person)
+                  pre personEmployed: employee->includes(p)
+                  post personNoLongerEmployed: employee->excludes(p)
+                """,
+                "USE_MODEL_TEXT", "REPLACE_UML_MODEL", true, "Employee.use", "use", "open-existing", null));
+
+        assertThat(response.success()).as(response.diagnostics().toString()).isTrue();
+        assertThat(response.diagnostics()).isEmpty();
     }
 
     @Test

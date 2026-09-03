@@ -11,6 +11,9 @@ import org.junit.jupiter.api.Test;
 
 import de.useweb.backend.domain.project.Project;
 import de.useweb.backend.domain.project.ProjectId;
+import de.useweb.backend.domain.layout.DiagramLayout;
+import de.useweb.backend.domain.layout.LayoutInformation;
+import de.useweb.backend.domain.layout.NodeLayout;
 import de.useweb.backend.error.InvalidProjectNameException;
 import de.useweb.backend.error.ProjectNotFoundException;
 import de.useweb.backend.persistence.json.ProjectJsonSerializer;
@@ -77,6 +80,23 @@ class ProjectServiceTest {
         assertThat(projectService.loadProject(project.id())).isEqualTo(saved);
         assertThat(saved.metadata().createdAt()).isEqualTo(Instant.parse("2026-07-16T12:00:00Z"));
         assertThat(saved.metadata().updatedAt()).isEqualTo(Instant.parse("2026-07-16T12:00:00Z"));
+    }
+
+    @Test
+    void saveLayoutPreservesModelRevisionAndAuthoritativeProjectState() {
+        Project project = projectService.createProject("Library", null);
+        LayoutInformation layout = new LayoutInformation(
+                new DiagramLayout(java.util.List.of(new NodeLayout("class-book", 40, 60, 220.0, 140.0)),
+                        java.util.List.of(), null),
+                DiagramLayout.empty());
+
+        Project saved = projectService.saveLayout(project.id(), layout);
+
+        assertThat(saved.layout()).isEqualTo(layout);
+        assertThat(saved.metadata()).isEqualTo(project.metadata());
+        assertThat(saved.umlModel()).isSameAs(project.umlModel());
+        assertThat(saved.objectModel()).isSameAs(project.objectModel());
+        assertThat(projectService.loadProject(project.id())).isEqualTo(saved);
     }
 
     @Test

@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import de.useweb.backend.api.dto.modeltext.ApplyModelTextRequestDto;
 import de.useweb.backend.api.dto.modeltext.ApplyModelTextResponseDto;
 import de.useweb.backend.api.dto.modeltext.ModelTextDto;
+import de.useweb.backend.api.dto.layout.LayoutDto;
 import de.useweb.backend.api.dto.project.CreateProjectRequestDto;
 import de.useweb.backend.api.dto.project.ImportProjectRequestDto;
 import de.useweb.backend.api.dto.project.ImportProjectResponseDto;
@@ -94,6 +95,13 @@ public class ProjectController {
     @PutMapping("/{projectId}")
     public ProjectDto saveProject(@PathVariable String projectId, @RequestBody ProjectDto project) {
         return ProjectDtoMapper.toDto(projectService.replaceProject(new ProjectId(projectId), ProjectDtoMapper.toDomain(project)));
+    }
+
+    @PutMapping("/{projectId}/layout")
+    public LayoutDto saveLayout(@PathVariable String projectId, @RequestBody LayoutDto layout) {
+        return ProjectDtoMapper.toDto(projectService.saveLayout(
+                new ProjectId(projectId),
+                ProjectDtoMapper.toDomain(layout)).layout());
     }
 
     @GetMapping("/{projectId}/model-text")

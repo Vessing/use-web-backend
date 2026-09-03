@@ -2,9 +2,11 @@ package de.useweb.backend.application.projection;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
@@ -41,6 +43,8 @@ import de.useweb.backend.domain.uml.UmlAttribute;
 import de.useweb.backend.domain.uml.UmlClass;
 import de.useweb.backend.domain.uml.UmlClassId;
 import de.useweb.backend.domain.uml.UmlModel;
+import de.useweb.backend.domain.uml.UmlOperation;
+import de.useweb.backend.modeltext.importer.ModelTextImportResolver;
 import de.useweb.backend.ocl.definition.OclDefinition;
 import de.useweb.backend.ocl.definition.OclDefinitionService;
 import de.useweb.backend.ocl.definition.OclModelDefinitionFactory;
@@ -57,12 +61,14 @@ public class ProjectReadModelService {
     private final ProjectService projectService;
     private final ValidationService validationService;
     private final OclDefinitionApplicationService definitionService;
+    private final ModelTextImportResolver importResolver;
 
     public ProjectReadModelService(ProjectService projectService, ValidationService validationService,
-            OclDefinitionApplicationService definitionService) {
+            OclDefinitionApplicationService definitionService, ModelTextImportResolver importResolver) {
         this.projectService = projectService;
         this.validationService = validationService;
         this.definitionService = definitionService;
+        this.importResolver = importResolver;
     }
 
     public ProjectReadModelDto get(ProjectId projectId) {
@@ -74,7 +80,7 @@ public class ProjectReadModelService {
                 project.metadata().updatedAt().toString(),
                 Map.of("staticFeatures", true, "featureRedefinition", true,
                         "typedValues", true, "naryLinks", true, "associationClasses", true),
-                explorer(project.umlModel()), classes(project, definitions), enumerations(project.umlModel()),
+                explorer(project), classes(project, definitions), enumerations(project.umlModel()),
                 definitionViews(project, definitions),
                 objects(project, definitions, diagnostics), objectAssociations(project, diagnostics), diagnostics);
     }
@@ -163,9 +169,33 @@ public class ProjectReadModelService {
                     operation.id().value(), operation.name(), owner.qualifiedName(model) + "::" + operation.name(),
                     "OPERATION", operation.returnType().name(), namedClass(model, owner.id()),
                     !owner.id().equals(selected.id()), false, false, operation.staticOperation(), operation.bodyExpression(),
-                    operation.redefinedOperationIds().stream().map(id -> namedOperation(model, id)).toList(), null)));
+                    redefinedOperations(model, selected, owner, operation), null)));
         }
         return List.copyOf(result);
+    }
+
+    private List<NamedElementDto> redefinedOperations(UmlModel model, UmlClass selected, UmlClass owner,
+            UmlOperation operation) {
+        LinkedHashSet<String> targetIds = new LinkedHashSet<>(operation.redefinedOperationIds().stream()
+                .map(id -> id.value()).toList());
+        // USE operation declarations express overriding by an equal signature in a subtype.
+        // Preserve that intent in the read model even though the source has no separate UML
+        // 'redefines' token.
+        if (owner.id().equals(selected.id())) {
+            model.superClassesOf(selected.id()).stream().map(model::findClass).flatMap(java.util.Optional::stream)
+                    .flatMap(supertype -> supertype.operations().stream())
+                    .filter(candidate -> sameSignature(operation, candidate))
+                    .forEach(candidate -> targetIds.add(candidate.id().value()));
+        }
+        return targetIds.stream().map(id -> namedOperation(model,
+                new de.useweb.backend.domain.uml.UmlOperationId(id))).toList();
+    }
+
+    private boolean sameSignature(UmlOperation left, UmlOperation right) {
+        return left.name().equals(right.name())
+                && left.returnType().equals(right.returnType())
+                && left.parameters().stream().map(parameter -> parameter.type()).toList()
+                        .equals(right.parameters().stream().map(parameter -> parameter.type()).toList());
     }
 
     private NamedElementDto namedAttribute(UmlModel model, de.useweb.backend.domain.uml.UmlAttributeId id) {
@@ -359,18 +389,28 @@ public class ProjectReadModelService {
         return scope.indexOf(target) + 1;
     }
 
-    private List<ExplorerElementDto> explorer(UmlModel model) {
+    private List<ExplorerElementDto> explorer(Project project) {
+        UmlModel model = project.umlModel();
+        ImportedSources importedSources = importedSources(project);
+        Set<String> legacyImportedPackageIds = model.imports().stream()
+                .map(modelImport -> modelImport.importedPackageId().value()).collect(java.util.stream.Collectors.toSet());
         List<ExplorerElementDto> result = new ArrayList<>();
         result.add(new ExplorerElementDto("project-root", model.id().value(), null, "Project root", model.name(), "PROJECT_ROOT",
                 false, false, null, null));
-        model.packages().forEach(pkg -> result.add(new ExplorerElementDto(pkg.id().value(), pkg.id().value(), packageParent(model, pkg.qualifiedName()),
+        importedSources.roots().forEach(source -> result.add(new ExplorerElementDto(
+                source.rootNodeId(), source.rootNodeId(), "project-root", source.sourcePath(), source.sourcePath(),
+                "IMPORT_ROOT", true, true, null, source.sourcePath())));
+        model.packages().stream().filter(pkg -> !legacyImportedPackageIds.contains(pkg.id().value())).forEach(pkg -> result.add(new ExplorerElementDto(pkg.id().value(), pkg.id().value(), packageParent(model, pkg.qualifiedName()),
                 lastSegment(pkg.qualifiedName()), pkg.qualifiedName(), "PACKAGE", false, false, null, null)));
-        model.classes().forEach(type -> result.add(classifierExplorer(type.id().value(), type.name(), type.qualifiedName(model),
-                type.packageId() == null ? "project-root" : type.packageId().value(), "CLASS")));
-        model.enumerations().forEach(type -> result.add(classifierExplorer(type.id().value(), type.name(), type.qualifiedName(model),
-                type.packageId() == null ? "project-root" : type.packageId().value(), "ENUMERATION")));
-        model.dataTypes().forEach(type -> result.add(classifierExplorer(type.id().value(), type.name(), type.qualifiedName(model),
-                type.packageId() == null ? "project-root" : type.packageId().value(), "DATATYPE")));
+        model.classes().stream().filter(type -> type.packageId() == null || !legacyImportedPackageIds.contains(type.packageId().value())).forEach(type -> result.add(classifierExplorer(type.id().value(), type.name(), type.qualifiedName(model),
+                type.packageId() == null ? "project-root" : type.packageId().value(), "CLASS",
+                importedSources.byElement().get("CLASS:" + type.name()))));
+        model.enumerations().stream().filter(type -> type.packageId() == null || !legacyImportedPackageIds.contains(type.packageId().value())).forEach(type -> result.add(classifierExplorer(type.id().value(), type.name(), type.qualifiedName(model),
+                type.packageId() == null ? "project-root" : type.packageId().value(), "ENUMERATION",
+                importedSources.byElement().get("ENUMERATION:" + type.name()))));
+        model.dataTypes().stream().filter(type -> type.packageId() == null || !legacyImportedPackageIds.contains(type.packageId().value())).forEach(type -> result.add(classifierExplorer(type.id().value(), type.name(), type.qualifiedName(model),
+                type.packageId() == null ? "project-root" : type.packageId().value(), "DATATYPE",
+                importedSources.byElement().get("DATATYPE:" + type.name()))));
         model.imports().forEach(modelImport -> {
             String root = "import-root-" + modelImport.id().value();
             result.add(new ExplorerElementDto(root, modelImport.id().value(), "project-root",
@@ -394,7 +434,34 @@ public class ProjectReadModelService {
         return List.copyOf(result);
     }
 
-    private ExplorerElementDto classifierExplorer(String id, String name, String qualifiedName, String parentId, String kind) {
+    private ImportedSources importedSources(Project project) {
+        Map<String, ImportedSource> result = new LinkedHashMap<>();
+        if (project.modelText() == null) {
+            return new ImportedSources(Map.of(), List.of());
+        }
+        List<ImportedSource> roots = project.modelText().sources().stream()
+                .filter(source -> source.importedBy() != null)
+                .map(source -> new ImportedSource(source.sourcePath())).distinct().toList();
+        Map<String, ImportedSource> sourceByPath = new LinkedHashMap<>();
+        roots.forEach(source -> sourceByPath.put(source.sourcePath(), source));
+        if (!sourceByPath.isEmpty()) {
+            Map<String, String> files = new LinkedHashMap<>();
+            project.modelText().sourceFiles().forEach(source -> files.put(source.sourcePath(), source.text()));
+            importResolver.resolve(project.modelText().sourceName(), project.modelText().text(), files)
+                    .elementSources().forEach((key, sourcePath) -> {
+                        ImportedSource source = sourceByPath.get(sourcePath);
+                        if (source != null) result.putIfAbsent(key, source);
+                    });
+        }
+        return new ImportedSources(Map.copyOf(result), roots);
+    }
+
+    private ExplorerElementDto classifierExplorer(String id, String name, String qualifiedName, String parentId, String kind,
+            ImportedSource importedSource) {
+        if (importedSource != null) {
+            return importedClassifier(importedSource.rootNodeId(), importedSource.rootNodeId(), id, name, qualifiedName,
+                    kind, null, importedSource.sourcePath());
+        }
         return new ExplorerElementDto(id, id, parentId, name, qualifiedName, kind, false, false, null, null);
     }
 
@@ -402,6 +469,15 @@ public class ProjectReadModelService {
             String qualifiedName, String kind, String importId, String provenance) {
         return new ExplorerElementDto(root + "::" + id, id, parentId, name, qualifiedName, kind,
                 true, true, importId, provenance);
+    }
+
+    private record ImportedSource(String sourcePath) {
+        private String rootNodeId() {
+            return "import-source-" + Integer.toUnsignedString(sourcePath.hashCode(), 36);
+        }
+    }
+
+    private record ImportedSources(Map<String, ImportedSource> byElement, List<ImportedSource> roots) {
     }
 
     private String packageParent(UmlModel model, String qualifiedName) {

@@ -177,6 +177,44 @@ class BackendApiControllerTest {
     }
 
     @Test
+    void savesLayoutWithoutChangingModelRevision() throws Exception {
+        String projectId = createProject("Layout Project");
+        JsonNode before = objectMapper.readTree(mockMvc.perform(
+                        get("/api/v1/projects/{projectId}/read-model", projectId))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+
+        mockMvc.perform(put("/api/v1/projects/{projectId}/layout", projectId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "classDiagram": {
+                                    "nodes": [{
+                                      "elementId": "class-book",
+                                      "x": 40,
+                                      "y": 60,
+                                      "width": 220,
+                                      "height": 140
+                                    }],
+                                    "edges": [],
+                                    "viewport": null
+                                  },
+                                  "objectDiagram": {
+                                    "nodes": [],
+                                    "edges": [],
+                                    "viewport": null
+                                  }
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.classDiagram.nodes[0].elementId", equalTo("class-book")));
+
+        mockMvc.perform(get("/api/v1/projects/{projectId}/read-model", projectId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.readVersion", equalTo(before.get("readVersion").asText())));
+    }
+
+    @Test
     void validatesProjectAndReturnsValidationResultWithHttpOk() throws Exception {
         String projectId = createProject("Validation Project");
 
@@ -247,6 +285,42 @@ class BackendApiControllerTest {
                 .andExpect(jsonPath("$.projectId", equalTo(projectId)))
                 .andExpect(jsonPath("$.modelText", notNullValue()))
                 .andExpect(jsonPath("$.sourceName", equalTo("library.use")));
+    }
+
+    @Test
+    void persistsBundledSourcesAndProjectsImportedElementsBySourceFile() throws Exception {
+        String projectId = createProject("Bundled Sources");
+
+        mockMvc.perform(post("/api/v1/projects/{projectId}/model-text/apply", projectId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "modelText": "import * from \\"shared.use\\"\\nmodel Bundle\\nclass Local end\\n",
+                                  "format": "USE_MODEL_TEXT",
+                                  "mode": "REPLACE_UML_MODEL",
+                                  "includeDiagnostics": true,
+                                  "sourceName": "bundle.use",
+                                  "sourceFormat": "use",
+                                  "sourceOrigin": "explorer-import",
+                                  "sourceFiles": {
+                                    "shared.use": "model Shared\\nclass Imported end\\n"
+                                  },
+                                  "replaceSourceFiles": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", equalTo(true)))
+                .andExpect(jsonPath("$.modelText.sourceFiles[0].sourcePath", equalTo("shared.use")))
+                .andExpect(jsonPath("$.modelText.sourceFiles[0].text", containsString("class Imported")));
+
+        mockMvc.perform(get("/api/v1/projects/{projectId}/read-model", projectId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.explorer[?(@.kind == 'IMPORT_ROOT' && @.name == 'shared.use')].imported",
+                        contains(true)))
+                .andExpect(jsonPath("$.explorer[?(@.kind == 'CLASS' && @.name == 'Imported')].imported",
+                        contains(true)))
+                .andExpect(jsonPath("$.explorer[?(@.kind == 'CLASS' && @.name == 'Local')].imported",
+                        contains(false)));
     }
 
     @Test

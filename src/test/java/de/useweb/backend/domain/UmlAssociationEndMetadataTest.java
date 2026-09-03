@@ -70,6 +70,21 @@ class UmlAssociationEndMetadataTest {
                 .isEqualTo("UNKNOWN_SUBSETS_END");
     }
 
+    @Test
+    void permitsUnnamedAssociationEndsAndKeepsStableIds() {
+        UmlClass left = umlClass("left", "Left");
+        UmlClass right = umlClass("right", "Right");
+        UmlAssociationEnd leftEnd = end("left-end", left.id(), null, Multiplicity.exactlyOne());
+        UmlAssociationEnd rightEnd = end("right-end", right.id(), null, Multiplicity.zeroToMany());
+
+        UmlModel model = model(List.of(left, right), List.of(new UmlAssociation(
+                new UmlAssociationId("unnamed"), "Unnamed", List.of(leftEnd, rightEnd))));
+
+        assertThat(model.associations().getFirst().ends()).extracting(UmlAssociationEnd::roleName)
+                .containsExactly(null, null);
+        assertThat(ProjectDtoMapper.toDomain(ProjectDtoMapper.toDto(model))).isEqualTo(model);
+    }
+
     private static UmlAssociationEnd end(String id, UmlClassId classId, String role, Multiplicity multiplicity) {
         return new UmlAssociationEnd(new UmlAssociationEndId(id), classId, role, multiplicity, true);
     }

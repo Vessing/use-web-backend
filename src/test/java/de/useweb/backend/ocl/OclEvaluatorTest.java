@@ -331,6 +331,9 @@ class OclEvaluatorTest {
         assertThat(evaluate("'ab'.concat('cd') = 'abcd'", snapshot, alice).value()).isEqualTo(new BooleanValue(true));
         assertThat(evaluate("3.9.floor = 3", snapshot, alice).value()).isEqualTo(new BooleanValue(true));
         assertThat(evaluate("self.borrowedBooks->size = 1", snapshot, alice).value()).isEqualTo(new BooleanValue(true));
+        assertThat(evaluate("self.isDefined()", snapshot, alice).value()).isEqualTo(new BooleanValue(true));
+        assertThat(evaluate("null.isUndefined()", snapshot, alice).value()).isEqualTo(new BooleanValue(true));
+        assertThat(evaluate("invalid.isDefined()", snapshot, alice).value()).isEqualTo(new BooleanValue(false));
     }
 
     @Test
